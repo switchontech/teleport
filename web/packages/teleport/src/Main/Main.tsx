@@ -219,24 +219,16 @@ function renderRoutes(
       continue;
     }
 
-    // add the route of the 'locked' variants of the features
+    // locked features: redirect to root instead of showing upgrade CTAs
     if (feature.isLocked?.(lockedFeatures)) {
-      if (!feature.lockedRoute) {
-        throw new Error('a locked feature without a locked route was found');
+      if (feature.lockedRoute) {
+        const { path, exact } = feature.lockedRoute;
+        routes.push(
+          <Route key={index} path={path} exact={exact}>
+            <Redirect to={cfg.routes.root} />
+          </Route>
+        );
       }
-
-      const { path, title, exact, component: Component } = feature.lockedRoute;
-      routes.push(
-        <Route title={title} key={index} path={path} exact={exact}>
-          <CatchError>
-            <Suspense fallback={null}>
-              <Component />
-            </Suspense>
-          </CatchError>
-        </Route>
-      );
-
-      // return early so we don't add the original route
       continue;
     }
 

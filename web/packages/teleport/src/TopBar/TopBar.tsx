@@ -18,12 +18,12 @@
 
 import React, { type JSX } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
-import styled, { css, useTheme } from 'styled-components';
+import styled, { css } from 'styled-components';
 
-import { Box, breakpointsPx, Flex, Image, TopNav } from 'design';
+import { Box, breakpointsPx, Flex, TopNav } from 'design';
 import { HoverTooltip } from 'design/Tooltip';
 
-import { logoSrc } from 'teleport/components/LogoHero/LogoHero';
+import { SwitchOnLogo } from 'teleport/components/SwitchOnLogo';
 import { UserMenuNav } from 'teleport/components/UserMenuNav';
 import cfg from 'teleport/config';
 import { FeatureScopes } from 'teleport/features';
@@ -96,33 +96,19 @@ const TeleportLogo = ({
   CustomLogo?: () => React.ReactElement;
   withLink: boolean;
 }) => {
-  const theme = useTheme();
-  const src = logoSrc(theme.type);
   const logoContent = CustomLogo ? (
     <CustomLogo />
   ) : (
-    <Image
+    <span
       data-testid="teleport-logo"
-      src={src}
-      alt="Teleport logo"
-      css={`
-        padding-left: ${props => props.theme.space[3]}px;
-        padding-right: ${props => props.theme.space[3]}px;
-        height: 18px;
-        @media screen and (min-width: ${p => p.theme.breakpoints.small}) {
-          height: 28px;
-          padding-left: ${props => props.theme.space[4]}px;
-          padding-right: ${props => props.theme.space[4]}px;
-        }
-        @media screen and (min-width: ${p => p.theme.breakpoints.large}) {
-          height: 30px;
-        }
-      `}
-    />
+      style={{ paddingLeft: 16, paddingRight: 16, display: 'flex', alignItems: 'center' }}
+    >
+      <SwitchOnLogo height={36} />
+    </span>
   );
 
   return withLink ? (
-    <HoverTooltip placement="bottom" tipContent="Teleport Resources Home">
+    <HoverTooltip placement="bottom" tipContent="DeepInspect Pro">
       <LinkLogoWrapper to={cfg.routes.root}>{logoContent}</LinkLogoWrapper>
     </HoverTooltip>
   ) : (

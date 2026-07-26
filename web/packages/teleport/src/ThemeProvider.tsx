@@ -21,82 +21,29 @@ import {
   ThemeProvider as NewThemeProvider,
   TELEPORT_THEME,
   THEMES,
-  UiThemeMode,
 } from '@gravitational/design-system';
-import { useEffect, useMemo, useState, type PropsWithChildren } from 'react';
-import { useMediaQuery } from 'usehooks-ts';
+import { useMemo, type PropsWithChildren } from 'react';
 
-import {
-  bblpTheme,
-  darkTheme,
-  lightTheme,
-  resolveTheme,
-  Theme,
-  type ThemeDefinition,
-} from 'design/theme';
+import { lightTheme, resolveTheme, Theme } from 'design/theme';
 import { ConfiguredThemeProvider } from 'design/ThemeProvider';
 import { Theme as ThemePreference } from 'gen-proto-ts/teleport/userpreferences/v1/theme_pb';
 
-import cfg from 'teleport/config';
-import { KeysEnum, storageService } from 'teleport/services/storageService';
-
-const customThemes = {
-  bblp: bblpTheme,
-  // Lock mc to light theme, and flag it as a custom theme to disable the theme switcher.
-  mc: { ...lightTheme, isCustomTheme: true },
-};
+import { switchonOverrides } from 'teleport/theme/switchonTheme';
 
 export function ThemeProvider({ children }: PropsWithChildren) {
-  const themePreference = useThemePreference();
-  const prefersDark = useMediaQuery('(prefers-color-scheme: dark)');
-
   const selectedTheme = useMemo(() => {
-    const theme =
-      THEMES.find(t => t.name === cfg.customTheme) ??
-      THEMES.find(t => t.name === TELEPORT_THEME.name);
+    const theme = THEMES.find(t => t.name === TELEPORT_THEME.name);
 
     return {
       ...theme,
-      system: createThemeSystem(theme.config),
+      system: createThemeSystem(theme.config, switchonOverrides),
     };
   }, []);
 
-  // `UiThemeMode` controls how a theme reacts to user preference:
-  //
-  //   SingleColor  the theme has no light/dark variant (e.g. `bblp`).
-  //                colorMode is left undefined; nothing to force.
-  //   ForcedColor  the theme is locked to one mode (e.g. `mc` is forced
-  //                light). colorMode comes from the theme itself, not
-  //                from `ThemePreference`.
-  //   LightAndDark the theme has both variants (e.g. `teleport`).
-  //                colorMode is derived from `ThemePreference`, falling
-  //                back to the OS `prefers-color-scheme` when UNSPECIFIED.
-  const colorMode = useMemo(() => {
-    switch (selectedTheme.mode) {
-      case UiThemeMode.SingleColor:
-        return;
+  // GreenLight design system is light-only — always force light.
+  const colorMode = 'light';
 
-      case UiThemeMode.ForcedColor:
-        return selectedTheme.forcedColorMode;
-
-      case UiThemeMode.LightAndDark:
-        if (themePreference === ThemePreference.UNSPECIFIED) {
-          return prefersDark ? 'dark' : 'light';
-        }
-
-        return themePreference === ThemePreference.LIGHT ? 'light' : 'dark';
-    }
-  }, [themePreference, selectedTheme, prefersDark]);
-
-  const legacyTheme: Theme = useMemo(() => {
-    let theme = themePreferenceToTheme(themePreference, prefersDark);
-
-    if (customThemes[cfg.customTheme]) {
-      theme = customThemes[cfg.customTheme];
-    }
-
-    return resolveTheme(theme);
-  }, [themePreference, prefersDark]);
+  const legacyTheme: Theme = useMemo(() => resolveTheme(lightTheme), []);
 
   return (
     <NewThemeProvider forcedTheme={colorMode} system={selectedTheme.system}>
@@ -107,48 +54,6 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   );
 }
 
-function useThemePreference() {
-  const [themePreference, setThemePreference] = useState<ThemePreference>(
-    storageService.getThemePreference()
-  );
-
-  useEffect(() => {
-    storageService.subscribe(receiveMessage);
-
-    function receiveMessage(event: StorageEvent) {
-      const { key, newValue } = event;
-
-      if (!newValue || key !== KeysEnum.USER_PREFERENCES) {
-        return;
-      }
-
-      const preferences = JSON.parse(newValue);
-      if (
-        preferences.theme !== ThemePreference.UNSPECIFIED &&
-        preferences.theme !== themePreference
-      ) {
-        setThemePreference(preferences.theme);
-      }
-    }
-
-    // Cleanup on unmount
-    return function unsubscribe() {
-      storageService.unsubscribe(receiveMessage);
-    };
-  }, [themePreference]);
-
-  return themePreference;
-}
-
-function themePreferenceToTheme(
-  themePreference: ThemePreference,
-  prefersDark: boolean
-): ThemeDefinition {
-  if (themePreference === ThemePreference.UNSPECIFIED) {
-    return prefersDark ? darkTheme : lightTheme;
-  }
-  return themePreference === ThemePreference.LIGHT ? lightTheme : darkTheme;
-}
 
 /**
  * Determines the current theme preference.

@@ -28,6 +28,9 @@ import { ButtonLockedFeature } from 'teleport/components/ButtonLockedFeature';
 import { CtaEvent } from 'teleport/services/userEvent';
 
 export function CtaConnectors() {
+  return null;
+}
+function _CtaConnectorsUnused() {
   return (
     <AuthConnectorsCTABox>
       <CTALogosContainer>

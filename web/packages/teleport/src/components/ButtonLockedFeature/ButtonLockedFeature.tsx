@@ -37,54 +37,8 @@ export type Props = {
   [index: string]: any;
 };
 
-export function ButtonLockedFeature({
-  children,
-  noIcon = false,
-  event,
-  textLink = false,
-  url,
-  ...rest
-}: Props) {
-  const ctx = useTeleport();
-  const version = ctx.storeUser.state.cluster.authVersion;
-
-  function handleClick() {
-    if (cfg.isEnterprise) {
-      userEventService.captureCtaEvent(event);
-    }
-  }
-
-  if (textLink) {
-    return (
-      <Link
-        target="blank"
-        href={getSalesURL(version, cfg.isEnterprise, event, url)}
-        onClick={handleClick}
-        {...rest}
-      >
-        {children}
-      </Link>
-    );
-  }
-
-  return (
-    <ButtonPrimary
-      as="a"
-      target="blank"
-      href={getSalesURL(version, cfg.isEnterprise, event, url)}
-      onClick={handleClick}
-      py="12px"
-      width="100%"
-      style={{ textTransform: 'none' }}
-      rel="noreferrer"
-      {...rest}
-    >
-      <Flex alignItems="center">
-        {!noIcon && <UnlockIcon size="medium" data-testid="locked-icon" />}
-        {children}
-      </Flex>
-    </ButtonPrimary>
-  );
+export function ButtonLockedFeature(_props: Props) {
+  return null;
 }
 
 const UnlockIcon = styled(Unlock)`

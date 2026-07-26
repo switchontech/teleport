@@ -243,7 +243,7 @@ const cfg = {
   // If you have no other options, use the `isStripeManaged` config flag to determine if product used is Team.
   // EUB can be determined from a combination of existing config flags eg: `isUsageBasedBilling && !isStripeManaged`.
   isUsageBasedBilling: false,
-  hideInaccessibleFeatures: false,
+  hideInaccessibleFeatures: true,
   customTheme: '',
   isStripeManaged: false,
   hasQuestionnaire: false,

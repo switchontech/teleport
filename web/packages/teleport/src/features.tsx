@@ -96,7 +96,10 @@ class AccessRequests implements TeleportFeature {
     component: LockedAccessRequests,
   };
 
-  hasAccess() {
+  hasAccess(flags: FeatureFlags) {
+    if (shouldHideFromNavigation(cfg)) {
+      return flags.accessRequests;
+    }
     return true;
   }
 
