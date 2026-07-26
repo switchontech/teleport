@@ -16,69 +16,22 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode } from 'react';
 
-import { bblpTheme, darkTheme, lightTheme, Theme } from 'design/theme';
 import { ConfiguredThemeProvider } from 'design/ThemeProvider';
 import { Theme as ThemePreference } from 'gen-proto-ts/teleport/userpreferences/v1/theme_pb';
 
-import cfg from 'teleport/config';
-import { KeysEnum, storageService } from 'teleport/services/storageService';
+import { switchonTheme } from 'teleport/theme/switchonTheme';
 
-const customThemes = {
-  bblp: bblpTheme,
-  // Lock mc to light theme, and flag it as a custom theme to disable the theme switcher.
-  mc: { ...lightTheme, isCustomTheme: true },
-};
-
+// SwitchOn is a single-tenant white-labeled deployment — always light,
+// always the brand theme. No preference switching, no dark mode.
 export const ThemeProvider = (props: { children?: ReactNode }) => {
-  const [themePreference, setThemePreference] = useState<ThemePreference>(
-    storageService.getThemePreference()
-  );
-
-  useEffect(() => {
-    storageService.subscribe(receiveMessage);
-
-    function receiveMessage(event: StorageEvent) {
-      const { key, newValue } = event;
-
-      if (!newValue || key !== KeysEnum.USER_PREFERENCES) {
-        return;
-      }
-
-      const preferences = JSON.parse(newValue);
-      if (
-        preferences.theme !== ThemePreference.UNSPECIFIED &&
-        preferences.theme !== themePreference
-      ) {
-        setThemePreference(preferences.theme);
-      }
-    }
-
-    // Cleanup on unmount
-    return function unsubscribe() {
-      storageService.unsubscribe(receiveMessage);
-    };
-  }, [themePreference]);
-
-  let theme = themePreferenceToTheme(themePreference);
-  if (customThemes[cfg.customTheme]) {
-    theme = customThemes[cfg.customTheme];
-  }
-
   return (
-    <ConfiguredThemeProvider theme={theme}>
+    <ConfiguredThemeProvider theme={switchonTheme}>
       {props.children}
     </ConfiguredThemeProvider>
   );
 };
-
-function themePreferenceToTheme(themePreference: ThemePreference): Theme {
-  if (themePreference === ThemePreference.UNSPECIFIED) {
-    return getPrefersDark() ? lightTheme : darkTheme;
-  }
-  return themePreference === ThemePreference.LIGHT ? lightTheme : darkTheme;
-}
 
 /**
  * Determines the current theme preference.

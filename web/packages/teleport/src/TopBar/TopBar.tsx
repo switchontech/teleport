@@ -19,12 +19,12 @@
 import React, { type JSX } from 'react';
 import { matchPath, useHistory } from 'react-router';
 import { Link } from 'react-router-dom';
-import styled, { useTheme } from 'styled-components';
+import styled from 'styled-components';
 
-import { breakpointsPx, Flex, Image, TopNav } from 'design';
+import { breakpointsPx, Flex, TopNav } from 'design';
 import { HoverTooltip } from 'design/Tooltip';
 
-import { logoSrc } from 'teleport/components/LogoHero/LogoHero';
+import { SwitchOnLogo } from 'teleport/components/SwitchOnLogo';
 import { UserMenuNav } from 'teleport/components/UserMenuNav';
 import cfg from 'teleport/config';
 import { useFeatures } from 'teleport/FeaturesContext';
@@ -94,11 +94,8 @@ const TeleportLogo = ({
 }: {
   CustomLogo?: () => React.ReactElement;
 }) => {
-  const theme = useTheme();
-  const src = logoSrc(theme.type);
-
   return (
-    <HoverTooltip placement="bottom" tipContent="Teleport Resources Home">
+    <HoverTooltip placement="bottom" tipContent="DeepInspect Pro">
       <Link
         css={`
           cursor: pointer;
@@ -123,24 +120,17 @@ const TeleportLogo = ({
         {CustomLogo ? (
           <CustomLogo />
         ) : (
-          <Image
+          <span
             data-testid="teleport-logo"
-            src={src}
-            alt="Teleport logo"
-            css={`
-              padding-left: ${props => props.theme.space[3]}px;
-              padding-right: ${props => props.theme.space[3]}px;
-              height: 18px;
-              @media screen and (min-width: ${p => p.theme.breakpoints.small}) {
-                height: 28px;
-                padding-left: ${props => props.theme.space[4]}px;
-                padding-right: ${props => props.theme.space[4]}px;
-              }
-              @media screen and (min-width: ${p => p.theme.breakpoints.large}) {
-                height: 30px;
-              }
-            `}
-          />
+            style={{
+              paddingLeft: 16,
+              paddingRight: 16,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <SwitchOnLogo height={36} />
+          </span>
         )}
       </Link>
     </HoverTooltip>
