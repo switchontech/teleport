@@ -43,7 +43,16 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   // GreenLight design system is light-only — always force light.
   const colorMode = 'light';
 
-  const legacyTheme: Theme = useMemo(() => resolveTheme(lightTheme), []);
+  const legacyTheme: Theme = useMemo(() => {
+    const theme = resolveTheme(lightTheme);
+    const interFont = `Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    const jetBrainsFont = `"JetBrains Mono", "Droid Sans Mono", monospace`;
+    return {
+      ...theme,
+      font: interFont,
+      fonts: { sansSerif: interFont, mono: jetBrainsFont },
+    };
+  }, []);
 
   return (
     <NewThemeProvider forcedTheme={colorMode} system={selectedTheme.system}>
