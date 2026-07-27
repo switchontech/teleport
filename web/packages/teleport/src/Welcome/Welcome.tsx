@@ -60,7 +60,7 @@ export function Welcome({ NewCredentials }: WelcomeProps) {
       <Route exact path={cfg.routes.userInvite}>
         <WelcomeWrapper>
           <CardWelcome
-            title="Welcome to Teleport"
+            title="Welcome to DeepInspect Pro"
             subTitle="Please click the button below to create an account"
             btnText="Get started"
             onClick={handleOnInviteContinue}
