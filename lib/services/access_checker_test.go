@@ -1220,6 +1220,33 @@ func TestSSHPortForwarding(t *testing.T) {
 	}
 }
 
+// TestGetAllowedLoginsForResourceFiltersToNodesOwnVSUser verifies that when a
+// role grants logins for many VS machines via a wildcard node_labels match
+// (e.g. a shared "ssh-access" role appended to as new VS join), the login
+// list returned for one specific node is trimmed to root/customer/that
+// node's own "vs-user" label — not every VS login the role has accumulated.
+func TestGetAllowedLoginsForResourceFiltersToNodesOwnVSUser(t *testing.T) {
+	t.Parallel()
+
+	const roleName = "ssh-access"
+	roleSet := NewRoleSet(newRole(func(r *types.RoleV6) {
+		r.SetName(roleName)
+		r.SetLogins(types.Allow, []string{"root", "customer", "debendu", "prod"})
+	}))
+
+	accessInfo := &AccessInfo{Roles: []string{roleName}}
+	accessChecker := NewAccessCheckerWithRoleSet(accessInfo, "cluster", roleSet)
+
+	srv, err := types.NewServer("debendu-node", types.KindNode, types.ServerSpecV2{})
+	require.NoError(t, err)
+	srv.SetStaticLabels(map[string]string{"vs-user": "debendu"})
+
+	logins, err := accessChecker.GetAllowedLoginsForResource(srv)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"root", "customer", "debendu"}, logins,
+		"expected debendu's own login plus root/customer, not the full fleet-wide list")
+}
+
 type serverStub struct {
 	types.Server
 }
