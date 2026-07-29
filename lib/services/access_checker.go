@@ -1145,6 +1145,26 @@ func (a *accessChecker) GetAllowedLoginsForResource(resource AccessCheckable) ([
 		}
 	}
 
+	// For nodes that advertise a "vs-user" label, trim the display list to
+	// root/customer/that label's value. Logins granted via a shared,
+	// fleet-wide role (e.g. ssh-access) are otherwise all shown on every
+	// node, even though only one of them actually works on any given
+	// machine. Nodes without this label are untouched — this narrowing is
+	// specific to our VS convention, not a general-purpose behavior change.
+	if resource.GetKind() == types.KindNode {
+		if srv, ok := resource.(types.Server); ok {
+			if vsUser := srv.GetAllLabels()["vs-user"]; vsUser != "" {
+				filtered := allowed[:0]
+				for _, login := range allowed {
+					if login == "root" || login == "customer" || login == vsUser {
+						filtered = append(filtered, login)
+					}
+				}
+				allowed = filtered
+			}
+		}
+	}
+
 	return allowed, nil
 }
 
