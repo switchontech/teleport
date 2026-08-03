@@ -77,6 +77,19 @@ export function useRecording() {
     playerRef.current.moveToTime(time);
   }, []);
 
+  // handle a seek request from outside the player/timeline (e.g. clicking a
+  // command in the commands panel) — updates the player, and the timeline
+  // too if one is currently mounted.
+  const handleSeek = useCallback((time: number) => {
+    if (!playerRef.current) {
+      return;
+    }
+
+    currentTimeRef.current = time;
+    playerRef.current.moveToTime(time);
+    timelineRef.current?.moveToTime(time);
+  }, []);
+
   const toggleSidebar = useCallback(() => {
     // setSidebarHidden(prev => !prev) does not work with useLocalStorage, it stops working after the first toggle
     setSidebarHidden(!sidebarHidden);
@@ -113,6 +126,7 @@ export function useRecording() {
       sidebarWidth,
       setSidebarWidth,
       goToTime,
+      handleSeek,
       handleTimeChange,
       handleTimelineTimeChange,
       toggleSidebar,
@@ -129,6 +143,7 @@ export function useRecording() {
       sidebarWidth,
       setSidebarWidth,
       goToTime,
+      handleSeek,
       handleTimeChange,
       handleTimelineTimeChange,
       toggleSidebar,

@@ -22,6 +22,7 @@ import { fetchSessionRecordingMetadata } from './metadata';
 import {
   fetchRecordings,
   fetchRecordingThumbnail,
+  fetchSessionCommands,
   fetchSessionRecordingDuration,
 } from './recordings';
 
@@ -43,3 +44,6 @@ export const { useSuspenseQuery: useSuspenseGetRecordingThumbnail } =
 
 export const { useSuspenseQuery: useSuspenseGetRecordingDuration } =
   createQueryHook(['recording', 'duration'], fetchSessionRecordingDuration);
+
+export const { useSuspenseQuery: useSuspenseGetSessionCommands } =
+  createQueryHook(['recording', 'commands'], fetchSessionCommands);

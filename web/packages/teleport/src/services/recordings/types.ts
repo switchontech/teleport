@@ -157,3 +157,22 @@ export type SessionRecordingEvent =
   | SessionRecordingResizeEvent
   | SessionRecordingInactivityEvent
   | SessionRecordingRiskEvent;
+
+// SessionCommandEntry is a single command executed within a session, as
+// reported by enhanced session recording (BPF).
+export interface SessionCommandEntry {
+  // offsetMs is the number of milliseconds from session start to when the
+  // command ran — usable directly as a player/timeline seek target.
+  offsetMs: number;
+  path: string;
+  argv: string[];
+  cmd: string;
+  returnCode: number;
+  pid: number;
+  ppid: number;
+}
+
+export interface SessionCommandsResponse {
+  commands: SessionCommandEntry[] | null;
+  enhancedRecordingEnabled: boolean;
+}

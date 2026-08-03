@@ -1243,6 +1243,7 @@ func (h *Handler) bindDefaultEndpoints() {
 	h.GET("/webapi/sites/:site/sessionthumbnail/:session_id", h.WithClusterAuth(h.getSessionRecordingThumbnail))
 	h.GET("/webapi/sites/:site/sessionrecording/:session_id/metadata/ws", h.WithClusterAuthWebSocket(h.getSessionRecordingMetadata))
 	h.GET("/webapi/sites/:site/sessionrecording/:session_id/playback/ws", h.WithClusterAuthWebSocket(h.recordingPlaybackWS))
+	h.GET("/webapi/sites/:site/sessions/:session_id/commands", h.WithClusterAuth(h.getSessionCommands))
 
 	// MWI IaC Wizards
 	h.POST("/webapi/sites/:site/machine-id/wizards/ci-cd", h.WithClusterAuth(h.machineIDWizardGenerateIaC))

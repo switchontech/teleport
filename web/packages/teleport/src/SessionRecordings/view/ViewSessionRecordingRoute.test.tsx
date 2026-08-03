@@ -52,6 +52,16 @@ jest.mock('teleport/lib/AuthenticatedWebSocket', () => ({
 
 enableMswServer();
 
+// Default commands handler so tests that don't care about the commands
+// panel (i.e. all of them, at the moment) don't hit an unhandled request.
+beforeEach(() => {
+  server.use(
+    http.get(cfg.api.sessionRecording.commands, () =>
+      HttpResponse.json({ commands: [], enhancedRecordingEnabled: false })
+    )
+  );
+});
+
 afterEach(() => {
   testQueryClient.clear();
   jest.clearAllMocks();

@@ -576,6 +576,7 @@ const cfg = {
       playback:
         '/v1/webapi/sites/:clusterId/sessionrecording/:sessionId/playback/ws',
       thumbnail: '/v1/webapi/sites/:clusterId/sessionthumbnail/:sessionId',
+      commands: '/v1/webapi/sites/:clusterId/sessions/:sessionId/commands',
     },
 
     managedUpdates: {
@@ -1128,6 +1129,13 @@ const cfg = {
 
   getSessionRecordingThumbnailUrl(clusterId: string, sessionId: string) {
     return generatePath(cfg.api.sessionRecording.thumbnail, {
+      clusterId,
+      sessionId,
+    });
+  },
+
+  getSessionCommandsUrl(clusterId: string, sessionId: string) {
+    return generatePath(cfg.api.sessionRecording.commands, {
       clusterId,
       sessionId,
     });

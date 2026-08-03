@@ -24,6 +24,7 @@ import type {
   RecordingsQuery,
   RecordingsResponse,
   RecordingType,
+  SessionCommandsResponse,
   SessionRecordingThumbnail,
 } from './types';
 
@@ -121,6 +122,24 @@ export async function fetchRecordingThumbnail(
   }
 
   return response as SessionRecordingThumbnail;
+}
+
+interface FetchSessionCommandsVariables {
+  clusterId: string;
+  sessionId: string;
+}
+
+export async function fetchSessionCommands(
+  { clusterId, sessionId }: FetchSessionCommandsVariables,
+  signal?: AbortSignal
+): Promise<SessionCommandsResponse> {
+  const url = cfg.getSessionCommandsUrl(clusterId, sessionId);
+  const response = await api.get(url, signal);
+
+  return {
+    commands: response?.commands ?? [],
+    enhancedRecordingEnabled: !!response?.enhancedRecordingEnabled,
+  };
 }
 
 export const RECORDING_TYPES_WITH_THUMBNAILS: RecordingType[] = [

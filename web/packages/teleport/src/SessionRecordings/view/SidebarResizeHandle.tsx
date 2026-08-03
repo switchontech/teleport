@@ -26,7 +26,7 @@ import styled from 'styled-components';
 
 import { useStateRef } from 'shared/hooks';
 
-export const DEFAULT_SIDEBAR_WIDTH = 350;
+export const DEFAULT_SIDEBAR_WIDTH = 480;
 export const MIN_SIDEBAR_WIDTH = 250;
 export const MAX_SIDEBAR_WIDTH = 600;
 

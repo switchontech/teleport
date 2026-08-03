@@ -32,11 +32,13 @@ import { RecordingType } from 'teleport/services/recordings';
 import {
   useSuspenseGetRecordingDuration,
   useSuspenseGetRecordingMetadata,
+  useSuspenseGetSessionCommands,
 } from 'teleport/services/recordings/hooks';
 import {
   RECORDING_TYPES_WITH_METADATA,
   VALID_RECORDING_TYPES,
 } from 'teleport/services/recordings/recordings';
+import { CommandsPanel } from 'teleport/SessionRecordings/view/CommandsPanel';
 import type { RecordingWithSummaryProps } from 'teleport/SessionRecordings/view/RecordingWithSummary';
 import { SessionRecordingDetails } from 'teleport/SessionRecordings/view/SessionRecordingDetails';
 import { RecordingTimeline } from 'teleport/SessionRecordings/view/Timeline/RecordingTimeline';
@@ -170,6 +172,13 @@ function RecordingWithMetadata({
     sessionId,
   });
 
+  const isSSH = data.metadata.type === 'ssh';
+
+  const { data: commandsData } = useSuspenseGetSessionCommands({
+    clusterId,
+    sessionId,
+  });
+
   const {
     containerRef,
     playerRef,
@@ -179,6 +188,7 @@ function RecordingWithMetadata({
     sidebarWidth,
     setSidebarWidth,
     timelineHidden,
+    handleSeek,
     handleTimeChange,
     handleTimelineTimeChange,
     toggleSidebar,
@@ -217,6 +227,15 @@ function RecordingWithMetadata({
             recordingType={data.metadata.type}
             metadata={data.metadata}
           />
+
+          {isSSH && (
+            <CommandsPanel
+              commands={commandsData.commands ?? []}
+              enhancedRecordingEnabled={commandsData.enhancedRecordingEnabled}
+              onSeek={handleSeek}
+            />
+          )}
+
           <SidebarResizeHandle
             width={sidebarWidth}
             onChange={setSidebarWidth}
