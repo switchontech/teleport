@@ -144,6 +144,9 @@ func findSessionBounds(ctx context.Context, clt authclient.ClientI, sessionID st
 
 // searchSessionCommands searches the audit log for session.command events
 // belonging to sessionID within [from, to], paginating until exhausted.
+// Shell startup/teardown helper invocations (rc-file sourcing, PAM checks,
+// logout cleanup) are filtered out so only commands a person actually typed
+// are returned.
 func searchSessionCommands(ctx context.Context, clt authclient.ClientI, sessionID string, from, to time.Time) ([]sessionCommandEntry, error) {
 	from = from.Add(-commandSearchWindowPadding)
 	to = to.Add(commandSearchWindowPadding)
@@ -172,11 +175,16 @@ func searchSessionCommands(ctx context.Context, clt authclient.ClientI, sessionI
 				continue
 			}
 
+			cmdStr := strings.TrimSpace(strings.Join(append([]string{cmd.Path}, cmd.Argv...), " "))
+			if isShellStartupNoise(cmd.Path, cmdStr) {
+				continue
+			}
+
 			commands = append(commands, sessionCommandEntry{
 				OffsetMs:   offsetMillis(cmd.Time, from.Add(commandSearchWindowPadding)),
 				Path:       cmd.Path,
 				Argv:       cmd.Argv,
-				Cmd:        strings.TrimSpace(strings.Join(append([]string{cmd.Path}, cmd.Argv...), " ")),
+				Cmd:        cmdStr,
 				ReturnCode: cmd.ReturnCode,
 				PID:        cmd.PID,
 				PPID:       cmd.PPID,
@@ -190,6 +198,33 @@ func searchSessionCommands(ctx context.Context, clt authclient.ClientI, sessionI
 	}
 
 	return commands, nil
+}
+
+// shellStartupNoiseCommands are exact (path + args) invocations that
+// interactive bash startup/teardown triggers on most Linux distros (sourcing
+// ~/.bashrc, PAM homedir checks, lesspipe/dircolors setup, logout cleanup).
+// BPF enhanced recording captures these execve calls alongside real user
+// commands since it traces at the syscall level, not the keystroke level.
+var shellStartupNoiseCommands = map[string]bool{
+	"/bin/bash":                           true,
+	"/proc/self/exe checkhomedir":         true,
+	"/usr/bin/uname -m":                   true,
+	"/usr/bin/lesspipe":                   true,
+	"/usr/bin/basename /usr/bin/lesspipe": true,
+	"/usr/bin/dirname /usr/bin/lesspipe":  true,
+	"/usr/bin/dircolors -b":               true,
+	"/usr/bin/clear_console -q":           true,
+}
+
+// shellStartupNoisePaths matches noise commands whose args vary (so an exact
+// string match in shellStartupNoiseCommands won't catch them), keyed by the
+// executable path.
+var shellStartupNoisePaths = map[string]bool{
+	"/usr/bin/locale-check": true,
+}
+
+func isShellStartupNoise(path, cmdStr string) bool {
+	return shellStartupNoiseCommands[cmdStr] || shellStartupNoisePaths[path]
 }
 
 func offsetMillis(t, sessionStart time.Time) int64 {
