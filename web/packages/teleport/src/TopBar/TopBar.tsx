@@ -100,6 +100,7 @@ const TeleportLogo = ({
         css={`
           cursor: pointer;
           display: flex;
+          text-decoration: none;
           transition: background-color 0.1s linear;
           &:hover {
             background-color: ${p =>
