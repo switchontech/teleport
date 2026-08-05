@@ -13,7 +13,7 @@
 #
 # Then send the file to the VS and run:
 #   scp ../vs/setup.sh user@vs-machine:~/
-#   sudo bash setup.sh <vs-name>
+#   sudo bash setup.sh
 
 set -e
 
@@ -84,5 +84,5 @@ echo " CA Pin: $CA_PIN"
 echo ""
 echo " Send to VS, then run:"
 echo "   scp ../vs/setup.sh user@vs-machine:~/"
-echo "   sudo bash setup.sh <vs-name>"
+echo "   sudo bash setup.sh"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

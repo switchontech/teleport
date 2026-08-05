@@ -5,6 +5,44 @@
 One-shot Docker-based deployment of our custom Teleport fork
 `switchontech/teleport`, based on stable `v18.10.0`
 
+## Features
+
+- **Rebranded, top to bottom.** Not stock Teleport with a logo swapped in
+  — our own theme, our own UI, baked directly into the fork so every
+  rebuild ships it automatically. Zero drift, zero manual re-skinning.
+- **Every command, every keystroke, on tape.** `enhanced_recording:
+  [command, network]` — BPF-based, kernel-level, not shell history, can't
+  be disabled or faked from inside the session — captures every command
+  and every network connection on every node. Click any session in the
+  audit log and watch it back like a video, scrub bar included. Nothing
+  anyone did over SSH is ever invisible after the fact.
+- **Full remote desktops — recorded too.** VS machines aren't just SSH
+  targets, they're one-click remote desktops streamed straight into the
+  browser (x11vnc + noVNC, tunneled entirely through Teleport — the VNC
+  port itself never touches the network). Desktop sessions get recorded
+  and replayed exactly like terminal ones — see the full VNC writeup in
+  [`deploy/vs/README.md`](../vs/README.md).
+- **4-role RBAC, engineered not improvised.** `super-admin` /
+  `cloud-admin-full-access` / `cloud-read-access` / `ssh-access` — every
+  operator gets exactly the blast radius they need and not an inch more.
+  No per-user hacks, no role sprawl, no "just give them admin for now."
+- **Root is off-limits by default.** Exactly one role on the entire
+  cluster can touch root (`super-admin`) — every other role is
+  hard-denied at the role level (`deny: {logins: [root]}`), enforced by
+  Teleport itself, not left to convention, trust, or a README nobody
+  reads.
+- **New machine joins, access is already waiting.** The
+  `ssh-access-watcher` daemon watches the cluster live and grants the
+  right login the instant a VS registers — nobody edits a role file to
+  onboard hardware, ever.
+- **One shared role, real Linux users.** `ssh-access` maps straight onto
+  each VS's actual desktop account — the same login the person sitting
+  at that machine already has. Access to the VS *is* access as that
+  machine's real user, not some synthetic Teleport-only identity.
+- **Built from our own source, not a binary download.** This is our
+  fork — our patches, our theme — compiled from scratch inside Docker and
+  stood up with one command. No Go, Rust, or Node ever touches the host.
+
 ## Architecture
 
 - **Two-stage Dockerfile**: builder stage (Ubuntu 22.04 + Go 1.25.11 + Rust
@@ -101,20 +139,6 @@ logins — both were tried and rejected as unmaintainable at scale.
   Re-run `install.sh` afterward (or just re-run `setup.sh`) so the service
   picks up the fresh identity — `install.sh` always restarts it.
 
-## Day-2 operations
-
-- Code change in the fork → `bash setup.sh` again (rebuild + redeploy,
-  idempotent — skips admin creation if the user already exists)
-- Role yaml change → `bash apply-roles.sh` alone
-- New VS joins → its `ssh-access` login is added automatically by the
-  watcher, no manual step
-- `PUBLIC_ADDR`/token/CA changed → `bash bake.sh` alone, then re-copy
-  `deploy/vs/setup.sh` to VS machines
-- Logs: `docker compose logs -f` (from `deploy/server/`)
-- Full reset (new CA): `docker compose down -v` (**wipes** `teleport_data`)
-  then `bash setup.sh` — every VS then needs `uninstall.sh` + `setup.sh`
-  again, and `bake.sh` needs a re-run
-
 ## Troubleshooting (real issues hit building this)
 
 - **`useradd` exit 4 / "UID not unique"**: caused by running with `sudo` —
@@ -142,8 +166,7 @@ logins — both were tried and rejected as unmaintainable at scale.
 
 - Forked `switchontech/teleport`, moved off unstable `master`
   (`19.0.0-prealpha.2`) onto stable `v18.10.0` — matches the VS nodes'
-  official Teleport version — preserving the fork's 3 custom commits
-  (theme rebrand + login-list filter).
+  official Teleport version.
 - Replaced the official `build.assets` Docker build path (unfixable Debian
   mirror connectivity in this environment) with a hand-rolled two-stage
   Dockerfile that never touches Debian's mirrors.

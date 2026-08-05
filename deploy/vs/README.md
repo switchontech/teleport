@@ -18,15 +18,86 @@ install, same shape as Teleport's own official package deployment.
 3. Checks kernel BTF support (`/sys/kernel/btf/vmlinux`) — disables
    `enhanced_recording` (BPF command/network session logging) if missing,
    rather than failing to start
-4. Writes `/etc/teleport.yaml`: SSH service (labels `vs-id`, `vs-user` =
-   detected active desktop user, `env=plant`) + app service exposing noVNC
-   at `<vs-name>.<proxy-host>`
+4. Writes `/etc/teleport.yaml`: SSH service (labels `vs-id` = this
+   machine's hostname, `vs-user` = detected active desktop user,
+   `env=plant`) + app service exposing noVNC at `<hostname>.<proxy-host>`
 5. Sets up x11vnc + websockify as **user** systemd services
    (`systemctl --user`) under the detected active graphical desktop user
    (not whoever ran sudo) — auto-detects the display (`:0`/`:1`/`:2`) and
    Xauth file at runtime
 6. Enables + restarts the `teleport` systemd service via a drop-in
    (`--insecure` flag — internal network, self-signed proxy cert)
+
+## Remote desktop (VNC) — how it works
+
+The VS's desktop is exposed as a Teleport **app**, not as a raw VNC port on
+the network. Nothing about this stack is directly reachable except through
+Teleport's own authenticated, audited proxy tunnel.
+
+**Components, wired together by `setup.sh`:**
+
+- **x11vnc** — grabs the real X11 display and serves it as VNC on
+  `127.0.0.1:5900` (`-localhost`, never bound to a real network interface).
+- **websockify** — bridges that raw VNC/TCP socket to a WebSocket, because
+  browsers can't speak raw VNC. Serves noVNC's static HTML/JS client
+  (`--web /usr/share/novnc`) and proxies its WebSocket traffic through to
+  `localhost:5900`, listening on `127.0.0.1:6080`.
+- **noVNC** — the actual in-browser VNC client (HTML5 canvas + JS), served
+  by websockify above. This is what the "Desktop" tile in the Teleport UI
+  actually loads.
+- **Teleport `app_service`** — registers `http://localhost:6080/vnc_auto.html?resize=scale`
+  as an app named after the VS. Teleport terminates the real internet-
+  facing TLS, authenticates the user, checks their role, records the
+  session, and reverse-tunnels the request back to this one local port.
+
+**Request path**: browser → Teleport proxy (TLS, auth, RBAC, audit) →
+reverse tunnel → VS's Teleport agent → `localhost:6080` (websockify) →
+`localhost:5900` (x11vnc) → the real X11 display. VNC/websockify never
+touch the network directly — Teleport is the only thing actually exposed,
+which is also why the desktop shows up in the audit log like any other
+session.
+
+**Why it needs runtime auto-detection, not a fixed config:**
+
+- **Which display?** The wrapper script (`/usr/local/bin/x11vnc-start.sh`)
+  probes `:0`, `:1`, `:2` with `xdpyinfo` until one answers, and retries
+  every 5s if none do yet (e.g. box just booted, nobody's logged in yet).
+- **Which Xauth cookie?** GDM puts it in different places depending on
+  session type — the wrapper checks
+  `/run/user/*/gdm/Xauthority`, `/run/user/*/.mutter-Xwaylandauth*`, and
+  `/home/*/.Xauthority` in order, uses whichever is readable first.
+- **Which user's desktop?** `setup.sh` walks `loginctl list-sessions`,
+  picks whichever session is `active` + type `x11`/`wayland` + UID ≥ 1000
+  (excludes GDM's own greeter session, which can otherwise look like an
+  "active" session too). That's the desktop that gets shared — the
+  machine's real logged-in user, not whoever happened to run `sudo`.
+
+**Why user-level systemd, not system-level:** x11vnc has to run *as* the
+desktop user to see their X session at all — a system-level service
+running as root can't attach to another user's display. Both units live
+under `systemctl --user` for `$DESKTOP_USER`, and
+`loginctl enable-linger $DESKTOP_USER` keeps that user's systemd instance
+(and so these services) alive even with no active login — otherwise
+`--user` services die the moment the session ends.
+
+**Hardening / conflicts handled:**
+
+- **`gnome-remote-desktop`** ships enabled by default on GNOME and also
+  wants port 5900 — `setup.sh` stops and disables it so it can't fight
+  x11vnc for the port.
+- **Stray processes from a previous run** (a manual test, an earlier
+  failed `setup.sh` attempt) can be left holding 5900/6080, which would
+  otherwise put the managed systemd units into an endless
+  bind-fails-restart loop — `setup.sh` force-kills both ports
+  (`fuser -k`) before starting its own instances.
+- **`websockify` binary path** varies by how it got installed —
+  `setup.sh` prefers the `python3-websockify` package's `websockify`
+  binary, falling back to noVNC's bundled
+  `/usr/share/novnc/utils/websockify/run` if that's what's present.
+- **Wayland**: x11vnc is an X11 tool — under Wayland it only sees XWayland
+  (compatibility-layer) windows, not the compositor's real desktop. There
+  is no fix for this short of the user's session being Xorg — `setup.sh`
+  detects and warns but can't work around it.
 
 ## Prerequisites
 
@@ -43,7 +114,7 @@ install, same shape as Teleport's own official package deployment.
 ```bash
 scp deploy/vs/setup.sh user@vs-machine:~/
 ssh user@vs-machine
-sudo bash setup.sh [vs-name]      # defaults to hostname
+sudo bash setup.sh                # VS identity is always this machine's hostname
 ```
 
 `PROXY`/`TOKEN`/`CA_PIN` are baked into the script's first lines by the
@@ -83,7 +154,7 @@ certificate" / connection reset. Fix, per VS:
 ```bash
 sudo bash uninstall.sh
 # copy the freshly re-baked setup.sh
-sudo bash setup.sh <vs-name>
+sudo bash setup.sh
 ```
 
 ## Automatic ssh-access registration
@@ -107,17 +178,3 @@ Once a VS joins, the server-side `ssh-access-watcher` daemon sees its
   versions are pinned per-release in the script rather than left to apt's
   resolution.
 
-## What's been done so far
-
-- Kept this installer bare-systemd/no-Docker by design (unlike the
-  server) — Teleport's own package manages itself as a systemd service,
-  matching upstream's simplest official deployment shape for edge nodes.
-- Hardened `uninstall.sh` to always do a full wipe (it briefly had a
-  lighter `--rejoin` mode — rejected, since a VS should never carry
-  forward stale CA/identity state).
-- Explicitly rejected a per-VS custom-role generator
-  (`vs-access-<name>` roles + a sync script) in favor of the static
-  `ssh-access` role + the automated watcher described above.
-- Moved this installer (and its `uninstall.sh` counterpart) from the
-  outer `teleport_deployment/vs-setup/` wrapper repo into this fork's
-  `deploy/vs/`, consolidating with the server-side tooling.

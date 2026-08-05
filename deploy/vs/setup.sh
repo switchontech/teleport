@@ -3,7 +3,7 @@
 # Proxy/token/CA-pin are baked in below — copy this one file to any VS machine
 # and run it, nothing else needed.
 #
-# Usage: sudo bash setup.sh [vs-name]   (defaults to this machine's hostname)
+# Usage: sudo bash setup.sh   (VS identity is always this machine's hostname)
 #
 # If the server's PUBLIC_ADDR or VS_JOIN_TOKEN in .env ever changes, re-run
 # on the server: bash bake-installer.sh   — it rewrites these three values
@@ -17,7 +17,7 @@ PROXY="172.30.196.160.nip.io:3080"
 TOKEN="vs-join-token-switchon"
 CA_PIN="sha256:d34246f0cde514c311315c5c3e234ef96d3592d9b9c499fc60c45010242dc7cf"
 
-VS_NAME="${1:-$(hostname)}"
+VS_NAME="$(hostname)"
 
 TELEPORT_VERSION="18.10.0"
 VNC_PORT="5900"
