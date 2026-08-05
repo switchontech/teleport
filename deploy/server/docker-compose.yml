@@ -1,0 +1,23 @@
+services:
+  teleport:
+    build:
+      context: ../..                       # repo root (teleport/) — see Dockerfile comment
+      dockerfile: deploy/server/Dockerfile
+    container_name: teleport_deployment
+    restart: unless-stopped                 # crash + reboot recovery — no systemd unit needed
+    env_file: .env
+    ports:
+      - "${WEB_PORT:-3080}:3080"
+      - "${AUTH_PORT:-3025}:3025"
+      - "${TUNNEL_PORT:-3024}:3024"
+    volumes:
+      - teleport_data:/var/lib/teleport      # cluster state — survives rebuilds/restarts
+    healthcheck:
+      test: ["CMD", "curl", "-sk", "https://localhost:3080/webapi/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  teleport_data:

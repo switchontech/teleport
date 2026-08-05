@@ -1,0 +1,7 @@
+.git
+**/node_modules
+build
+webassets
+.pnpm-store
+target
+build.assets/.cache

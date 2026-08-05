@@ -1,0 +1,36 @@
+kind: role
+metadata:
+  description: Shared VS logins — grants customer + each VS's own desktop user. Attach
+    alongside a primary role (super-admin, cloud-admin-full-access, cloud-read-access).
+    Append one literal login here per new VS.
+  name: ssh-access
+  revision: 39f03a19-3e5d-414e-9733-b6b9704ac54d
+spec:
+  allow:
+    logins:
+    - customer
+    - debendu
+    - prod
+    node_labels:
+      '*': '*'
+  deny: {}
+  options:
+    cert_format: standard
+    create_db_user: false
+    create_desktop_user: false
+    desktop_clipboard: true
+    desktop_directory_sharing: true
+    enhanced_recording:
+    - command
+    - network
+    forward_agent: false
+    idp:
+      saml:
+        enabled: true
+    max_session_ttl: 12h0m0s
+    pin_source_ip: false
+    record_session:
+      default: best_effort
+      desktop: true
+    ssh_file_copy: true
+version: v7

@@ -1,0 +1,31 @@
+kind: role
+version: v7
+metadata:
+  name: cloud-read-access
+  description: Read-only cloud access — SSH into VS nodes, view sessions and audit log, no config changes
+spec:
+  allow:
+    # customer: standard shared VS login
+    # internal.logins: user's own VS username, set as a login trait on their Teleport account
+    logins:
+      - customer
+      - '{{internal.logins}}'
+    node_labels:
+      '*': '*'
+    app_labels:
+      '*': '*'
+    rules:
+      - resources: [node, app, session, event]
+        verbs: [list, read]
+  deny:
+    logins:
+      - root
+  options:
+    max_session_ttl: 12h0m0s
+    ssh_file_copy: false
+    forward_agent: false
+    enhanced_recording:
+      - command
+      - network
+    record_session:
+      default: best_effort

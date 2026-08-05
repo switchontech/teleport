@@ -1,0 +1,32 @@
+kind: role
+version: v7
+metadata:
+  name: cloud-admin-full-access
+  description: Cloud admin — SSH + app access to all nodes, audit log read, no root
+spec:
+  allow:
+    # customer: standard shared VS login
+    logins:
+      - customer
+      - '{{internal.logins}}'
+    node_labels:
+      '*': '*'
+    app_labels:
+      '*': '*'
+    rules:
+      - resources: [node, app]
+        verbs: [list, read, create, update, delete]
+      - resources: [session, event]
+        verbs: [list, read]
+  deny:
+    logins:
+      - root
+  options:
+    max_session_ttl: 12h0m0s
+    ssh_file_copy: true
+    forward_agent: false
+    enhanced_recording:
+      - command
+      - network
+    record_session:
+      default: best_effort
