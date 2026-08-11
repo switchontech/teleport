@@ -38,7 +38,33 @@ mkdir -p /etc/ssh-access-watcher
 install -m 600 "$SCRIPT_DIR/secrets/identity" /etc/ssh-access-watcher/identity
 
 echo "=== Installing systemd unit ==="
-cp "$SCRIPT_DIR/ssh-access-watcher.service" /etc/systemd/system/ssh-access-watcher.service
+# Generated here rather than shipped as a companion file — keeps this
+# script self-contained (nothing to forget committing) and lets the role
+# file path below resolve correctly regardless of whose machine/home dir
+# this repo is checked out under.
+ROLES_DIR="$(cd "$SCRIPT_DIR/../../roles" && pwd)"
+cat > /etc/systemd/system/ssh-access-watcher.service <<EOF
+[Unit]
+Description=ssh-access-watcher — auto-appends new VS logins to the ssh-access Teleport role
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ssh-access-watcher
+Environment=TELEPORT_PROXY_ADDR=127.0.0.1:3025
+Environment=TELEPORT_IDENTITY_FILE=/etc/ssh-access-watcher/identity
+Environment=SSH_ACCESS_ROLE_FILE=${ROLES_DIR}/ssh-access.yaml
+Restart=always
+RestartSec=5
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadOnlyPaths=/etc/ssh-access-watcher
+ReadWritePaths=${ROLES_DIR}
+
+[Install]
+WantedBy=multi-user.target
+EOF
 systemctl daemon-reload
 systemctl enable ssh-access-watcher
 # "enable --now" is a no-op if the service is already running, so it won't

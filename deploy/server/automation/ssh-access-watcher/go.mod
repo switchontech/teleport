@@ -51,4 +51,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/gravitational/teleport/api => ../../teleport/api
+replace github.com/gravitational/teleport/api => ../../../../api
