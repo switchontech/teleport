@@ -45,11 +45,14 @@ One-shot Docker-based deployment of our custom Teleport fork
 
 ## Architecture
 
-- **Two-stage Dockerfile**: builder stage (Ubuntu 22.04 + Go 1.25.11 + Rust
+- **4-stage Dockerfile**: `builder` (Ubuntu 22.04 + Go 1.25.11 + Rust
   1.94.0 + Node 24.16.0, all installed via direct vendor downloads, not
-  Debian's mirrors — those timeout on this network) compiles
-  `teleport`/`tctl`/`tsh` from `/src` (repo root). Runtime stage is thin
-  Ubuntu 22.04 with just the 3 binaries + entrypoint.
+  Debian's mirrors — those timeout on this network) → `ui-builder`
+  (frontend/webassets — targetable in isolation via
+  `docker build --target ui-builder`, skipping the Go compile entirely) →
+  `binaries` (compiles `teleport`/`tctl`/`tsh` from `/src`, embedding
+  `ui-builder`'s webassets) → thin runtime stage with just the 3 binaries
+  + entrypoint.
 - **`docker-entrypoint.sh`** generates `/etc/teleport.yaml` from env vars
   (`.env`) on every container start, then execs `teleport start`.
 - **`docker-compose.yml`**: single service `teleport` (container name

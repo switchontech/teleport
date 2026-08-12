@@ -22,6 +22,7 @@ import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 
 import { breakpointsPx, Flex, TopNav } from 'design';
+import { Moon, Sun } from 'design/Icon';
 import { HoverTooltip } from 'design/Tooltip';
 
 import { SwitchOnLogo } from 'teleport/components/SwitchOnLogo';
@@ -31,6 +32,7 @@ import { useFeatures } from 'teleport/FeaturesContext';
 import { useLayout } from 'teleport/Main/LayoutContext';
 import { zIndexMap } from 'teleport/Navigation/zIndexMap';
 import { Notifications } from 'teleport/Notifications';
+import { useThemeToggle } from 'teleport/theme/ThemeContext';
 import useTeleport from 'teleport/useTeleport';
 
 export function TopBar({
@@ -42,6 +44,7 @@ export function TopBar({
   const history = useHistory();
   const features = useFeatures();
   const { currentWidth } = useLayout();
+  const { isDark, toggle } = useThemeToggle();
 
   // find active feature
   const feature = features.find(
@@ -63,6 +66,13 @@ export function TopBar({
       <TeleportLogo CustomLogo={CustomLogo} />
       {!feature?.logoOnlyTopbar && (
         <Flex height="100%" alignItems="center">
+          <HoverTooltip tipContent={isDark ? 'Light mode' : 'Dark mode'} placement="bottom">
+            <ThemeToggleButton onClick={toggle} aria-label="Toggle dark mode">
+              <AnimatedIcon key={isDark ? 'dark' : 'light'}>
+                {isDark ? <Sun size={iconSize} /> : <Moon size={iconSize} />}
+              </AnimatedIcon>
+            </ThemeToggleButton>
+          </HoverTooltip>
           <Notifications iconSize={iconSize} />
           <UserMenuNav username={ctx.storeUser.state.username} />
         </Flex>
@@ -137,6 +147,40 @@ const TeleportLogo = ({
     </HoverTooltip>
   );
 };
+
+const ThemeToggleButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  color: ${p => p.theme.colors.text.main};
+  transition: background-color 0.1s linear;
+  overflow: hidden;
+  &:hover {
+    background-color: ${p => p.theme.colors.interactive.tonal.primary[0]};
+  }
+`;
+
+const AnimatedIcon = styled.span`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  @keyframes theme-icon-in {
+    from {
+      transform: rotate(-90deg) scale(0.4);
+      opacity: 0;
+    }
+    to {
+      transform: rotate(0deg) scale(1);
+      opacity: 1;
+    }
+  }
+  animation: theme-icon-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+`;
 
 export const navigationIconSizeSmall = 20;
 export const navigationIconSizeMedium = 24;

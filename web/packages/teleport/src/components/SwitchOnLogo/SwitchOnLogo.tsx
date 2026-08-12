@@ -1,4 +1,7 @@
 import * as React from 'react';
+import { useTheme } from 'styled-components';
+
+import { Theme } from 'design/theme/themes/types';
 
 // Icon only (geometric mark, 49×48 viewBox).
 // Paths are white — render on brand-green background.
@@ -64,6 +67,8 @@ export const SwitchOnIconBadge = ({
 // Full wordmark: [icon] Deep**Inspect** Pro
 // "Deep" regular, "Inspect" bold, "Pro" small badge — matches DeepInspect brand.
 export const SwitchOnLogo = ({ height = 48 }: { height?: number }) => {
+  const theme = useTheme() as Theme;
+  const textColor = theme.colors.text.main;
   const fontSize = height * 0.48;
   const font =
     'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -76,7 +81,7 @@ export const SwitchOnLogo = ({ height = 48 }: { height?: number }) => {
           style={{
             fontFamily: font,
             fontSize,
-            color: '#1D2024',
+            color: textColor,
             letterSpacing: '-0.02em',
             lineHeight: 1,
           }}

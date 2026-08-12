@@ -95,11 +95,8 @@ class AccessRequests implements TeleportFeature {
     component: LockedAccessRequests,
   };
 
-  hasAccess(flags: FeatureFlags) {
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.accessRequests;
-    }
-    return true;
+  hasAccess(_flags: FeatureFlags) {
+    return false;
   }
 
   navigationItem = {
@@ -831,11 +828,8 @@ class FeatureDeviceTrust implements TeleportFeature {
     component: DeviceTrustLocked,
   };
 
-  hasAccess(flags: FeatureFlags) {
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.deviceTrust;
-    }
-    return true;
+  hasAccess(_flags: FeatureFlags) {
+    return false;
   }
 
   navigationItem = {
