@@ -2,12 +2,14 @@
 # One-shot build + run for the Teleport server.
 #
 # Build + run both happen inside `docker compose up --build`: the Dockerfile
-# is two-stage — stage 1 installs the pinned Go/Rust/Node toolchain and
-# compiles the fork, stage 2 is a thin runtime image with just the compiled
-# binaries. Toolchain installs go through Ubuntu's own apt + vendor-direct
-# downloads (go.dev, rustup.rs, nodejs.org via nvm), not Debian's mirror
-# network — deliberately avoids a known connectivity problem some networks
-# have reaching deb.debian.org.
+# is 4-stage — builder installs the pinned Go/Rust/Node toolchain, ui-builder
+# compiles the frontend, binaries compiles teleport/tctl/tsh (embedding the
+# frontend via go:embed), and the final stage is a thin runtime image with
+# just the compiled binaries. No `target:` is set in docker-compose.yml, so
+# this always builds through to that final stage. Toolchain installs go
+# through Ubuntu's own apt + vendor-direct downloads (go.dev, rustup.rs,
+# nodejs.org via nvm), not Debian's mirror network — deliberately avoids a
+# known connectivity problem some networks have reaching deb.debian.org.
 #
 # Supervision: docker-compose.yml sets `restart: unless-stopped` — that's
 # the crash/reboot recovery, no systemd unit needed for Teleport itself.

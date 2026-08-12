@@ -406,3 +406,21 @@ no manual per-VS role edit.
 - Hardened VS `uninstall.sh` to always do a full wipe (a lighter
   `--rejoin` mode was tried and rejected — a VS should never carry forward
   stale CA/identity state).
+
+---
+
+## Future goals
+
+- **Migrate `ssh-access-watcher` from a static signed identity to
+  Teleport Machine ID (`tbot`).** Today it authenticates with a
+  `tctl auth sign`'d identity file (fixed TTL, refreshed manually by
+  `bake.sh` on every setup run) — this is exactly what goes stale on a
+  cluster CA reset, which `bake.sh`'s refresh step exists only to paper
+  over. `tbot` instead joins via a token (like VS nodes already do) and
+  continuously renews its own short-lived certs for as long as it runs,
+  so it would survive a CA rotation transparently — no external re-sign
+  step needed at all. Real refactor, not a flag flip: `main.go` currently
+  loads one identity file once at startup (`client.LoadIdentityFile`) and
+  would need to watch/reload `tbot`'s continuously-refreshed output
+  directory instead; needs its own `tbot start` systemd unit + a bot
+  role/join token alongside the watcher.

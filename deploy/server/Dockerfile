@@ -1,7 +1,13 @@
 # syntax=docker/dockerfile:1
 #
-# Two-stage build. Stage 1 installs the toolchain and compiles the fork.
-# Stage 2 is a thin runtime image — just the compiled binaries, no toolchain.
+# Four-stage build: builder (toolchain+source) -> ui-builder (frontend) ->
+# binaries (Go compile, needs ui-builder's webassets for go:embed) -> thin
+# runtime (just the compiled binaries, no toolchain).
+#
+# The split lets you build/test just the frontend in isolation without
+# touching the Go compile at all:
+#   docker build -f deploy/server/Dockerfile --target ui-builder -t teleport-ui .
+# (run from the repo root — same context as the real build)
 #
 # Toolchain versions match this fork's actual pins:
 #   Go   1.25.11  (build.assets/versions.mk)
@@ -60,17 +66,50 @@ RUN for f in hello.go main.go; do \
         if [ -f "$f" ] && grep -q "^package main" "$f"; then rm "$f"; fi; \
     done
 
+# ── Stage: frontend only ──────────────────────────────────────────────────────
+# Isolated so `docker build --target ui-builder` builds/verifies just the
+# JS/webassets, skipping the Go compile entirely.
+FROM builder AS ui-builder
+
+# pnpm store (content-addressable download cache) + the project's actual
+# node_modules (resolved symlink tree, which also holds webpack's own
+# persistent build cache under node_modules/.cache) both need caching —
+# without the store, every build re-downloads every JS package; without
+# node_modules too, every build re-links them and re-bundles from scratch
+# even when nothing changed. Both mounts must be repeated on every RUN that
+# touches JS — a cache mount only exists for the duration of the RUN it's
+# declared on, its content doesn't persist into the image layer for later
+# steps.
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.local/share/pnpm/store \
+    --mount=type=cache,target=/src/node_modules \
     make ensure-js-deps
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.local/share/pnpm/store \
+    --mount=type=cache,target=/src/node_modules \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
     make build-ui
+
+# ── Stage: Go binaries — needs ui-builder's webassets for go:embed ──────────
+FROM ui-builder AS binaries
+
+# `teleport`/`tsh`'s Make targets are .PHONY and unconditionally depend on
+# `rdpclient`/`rdpdecoder` (Windows desktop RDP support), which are separate
+# `cargo build --release` invocations — these run on every single build
+# regardless of what changed, and without a cache mount here they were
+# re-downloading every crate from scratch and fully recompiling in release
+# mode every time. CARGO_HOME=/usr/local/cargo (set earlier), and cargo's
+# own build output defaults to <repo root>/target/ (no CARGO_TARGET_DIR set).
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
     make build/teleport build/tctl build/tsh
 
-# ── Stage 2: thin runtime — only the compiled binaries ───────────────────────
+# ── Stage: thin runtime — only the compiled binaries ─────────────────────────
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -79,9 +118,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpam0g ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/build/teleport /usr/local/bin/teleport
-COPY --from=builder /src/build/tctl     /usr/local/bin/tctl
-COPY --from=builder /src/build/tsh      /usr/local/bin/tsh
+COPY --from=binaries /src/build/teleport /usr/local/bin/teleport
+COPY --from=binaries /src/build/tctl     /usr/local/bin/tctl
+COPY --from=binaries /src/build/tsh      /usr/local/bin/tsh
 COPY deploy/server/docker-entrypoint.sh /docker-entrypoint.sh
 
 RUN chmod +x /docker-entrypoint.sh \
