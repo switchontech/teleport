@@ -24,9 +24,20 @@ teleport/
     │   ├── automation/ssh-access-watcher/
     │   └── .env / .env.example
     └── vs/
-        ├── setup.sh          # copy this one file to a VS machine
+        ├── setup-v4.sh       # CURRENT installer — copy this one to a VS machine
+        ├── setup-v3.sh       # known-safe fallback: never follows a user switch
+        ├── setup.sh          # v1, superseded (breaks GDM on user switch)
+        ├── setup-v2.sh       # v2, superseded (same failure as v1)
         └── uninstall.sh
 ```
+
+> **Heads-up on baking:** `deploy/server/bake.sh` hardcodes
+> `SETUP_SH="$SCRIPT_DIR/../vs/setup.sh"`, so it stamps the
+> proxy/token/CA-pin into `setup.sh` — the *old v1* script — not
+> `setup-v4.sh`. Either promote v4 to `setup.sh` or repoint `bake.sh`
+> before rolling out to the fleet; otherwise the baked script that gets
+> copied to each VS is the version that breaks GDM on user switch. See
+> `deploy/vs/README.md` → "Which script to deploy".
 
 ---
 
@@ -208,6 +219,11 @@ Teleport's own authenticated, audited proxy tunnel.
 
 - **x11vnc** — grabs the real X11 display and serves it as VNC on
   `127.0.0.1:5900` (`-localhost`, never bound to a real network interface).
+  Launched by `/usr/local/bin/x11vnc-start.sh`, which picks the session on
+  screen *now* and then `exec`s into x11vnc.
+- **x11vnc-watcher** — a separate root unit that watches for the active
+  session changing and restarts `x11vnc.service` once the new session has
+  settled. This is what makes the share follow a user switch.
 - **websockify** — bridges that raw VNC/TCP socket to a WebSocket, because
   browsers can't speak raw VNC. Serves noVNC's static HTML/JS client
   (`--web /usr/share/novnc`) and proxies its WebSocket traffic through to
@@ -230,31 +246,120 @@ session.
 **Why it needs runtime auto-detection, not a fixed config:**
 
 - **Which display?** The wrapper script (`/usr/local/bin/x11vnc-start.sh`)
-  probes `:0`, `:1`, `:2` with `xdpyinfo` until one answers, and retries
-  every 5s if none do yet (e.g. box just booted, nobody's logged in yet).
-- **Which Xauth cookie?** GDM puts it in different places depending on
-  session type — the wrapper checks
-  `/run/user/*/gdm/Xauthority`, `/run/user/*/.mutter-Xwaylandauth*`, and
-  `/home/*/.Xauthority` in order, uses whichever is readable first.
-- **Which user's desktop?** `setup.sh` walks `loginctl list-sessions`,
-  picks whichever session is `active` + type `x11`/`wayland` + UID ≥ 1000
-  (excludes GDM's own greeter session, which can otherwise look like an
-  "active" session too). That's the desktop that gets shared — the
-  machine's real logged-in user, not whoever happened to run `sudo`.
+  asks `logind` which session is actually `active` on a real `Seat` (type
+  `x11`/`wayland`, UID ≥ 1000), then looks up *that specific user's*
+  display via `who` (matching their username against a `:N`-shaped TTY
+  field). Not a guessed `:0`/`:1`/`:2` range, and not logind's own
+  `Display` session property either — that came back empty for X11
+  sessions on the GDM/logind version this was actually tested against;
+  `who`'s utmp-based reporting proved reliable where it wasn't. Needed at
+  all because fast user switching (not a logout) leaves the previous
+  user's X server alive in the background on its own display — a fixed
+  probe just finds *an* X server that answers, not necessarily the one
+  actually on screen — and each new graphical login gets the next free
+  display number anyway (`:3`, `:4`, ...), so a small hardcoded range runs
+  out after a couple of switches.
+- **Which Xauth cookie?** Scoped to that *specific* active session's UID —
+  `/run/user/<uid>/gdm/Xauthority`, `/run/user/<uid>/.mutter-Xwaylandauth*`,
+  then that user's own `~/.Xauthority` — never a blind glob across every
+  user's runtime dir, which could otherwise pick a different, stale user's
+  cookie.
+- **What if the active user changes while x11vnc is already running?** A
+  separate unit, `x11vnc-watcher.service`
+  (`/usr/local/bin/x11vnc-watch.sh`), notices and restarts
+  `x11vnc.service` so the wrapper reattaches to the new session. The share
+  follows a fast user switch on its own — roughly 10-25s of black screen,
+  then it reattaches. No logout required. The delay is the safety
+  mechanism, not slack; see below.
 
-**Why user-level systemd, not system-level:** x11vnc has to run *as* the
-desktop user to see their X session at all — a system-level service
-running as root can't attach to another user's display. Both units live
-under `systemctl --user` for `$DESKTOP_USER`, and
-`loginctl enable-linger $DESKTOP_USER` keeps that user's systemd instance
-(and so these services) alive even with no active login — otherwise
-`--user` services die the moment the session ends.
+### User switching — why the delay exists
+
+Four iterations were needed here, and the obvious implementation is the
+broken one:
+
+| version | approach | result |
+|---|---|---|
+| v1 | killed x11vnc the instant a switch was detected | GNOME broke |
+| v2 | exited instead; systemd's cgroup teardown killed it | GNOME broke |
+| v3 | never tore down at all | safe, but never followed a switch |
+| **v4** | tears down, but only **after** the switch fully settles | safe **and** follows |
+
+In v1 and v2 the switch *away* worked fine — the new user's screen appeared
+correctly. What broke was switching **back** to the earlier user: GDM came
+apart and the desktop rendered but accepted no input.
+
+The cause was **timing, not the teardown itself**. v4 performs the same
+destructive act as v2 — `SIGTERM` to an x11vnc attached to a live session —
+and nothing breaks. Only the moment it lands changed:
+
+> Touching the X server during a VT switch breaks it.
+> Before and after are both fine.
+
+v2 landed inside that window on *every* switch, and its own code shows why:
+it exited not only on "the display changed" but also on "no active session
+found" — which is exactly what a machine looks like mid-transition, with the
+greeter up or the new session still authenticating. That branch fired
+dead-centre of the danger window every time.
+
+What v4 does differently:
+
+- "no active session" resets the counter and waits — never triggers a
+  restart.
+- `LockedHint=no` is required: the user has actually finished logging in or
+  unlocking. Matters most switching *back*, where the returning session is
+  already `active` while its lock screen is still up.
+- the target display must hold steady across 3 consecutive polls (~6s) and
+  answer `xdpyinfo`.
+- a **separate always-running unit** does the watching. The wrapper is
+  `x11vnc.service`'s own main process and loses all state on every restart,
+  so it structurally cannot enforce a delay across one; the watcher never
+  restarts, so it can.
+- a 20s cooldown after each restart prevents thrash on rapid switching.
+
+On the switch-back path specifically, `xdpyinfo` proves nothing (that X
+server never died) and `LockedHint` flips at password-accept, not when
+mutter has finished reacquiring DRM master — so `SETTLE_POLLS` is doing
+nearly all the work. If switch-back regresses, raise it (10 ≈ 20s) before
+concluding anything else.
+
+**Why root, not the desktop user's own systemd `--user` instance:** this
+used to run as `$DESKTOP_USER` (whoever `setup.sh` detected at install
+time), which meant it could only ever attach to *that one account's* X
+session — it lacks permission to read a different user's `~/.Xauthority`
+(mode 600, owned by them). VS desktop users change constantly in normal
+use, so this produced a real recurring bug: switch from `prod` to
+`customer` at the desktop without re-running `setup.sh`, and Remote
+Desktop shows a black/stale screen — the service is still faithfully
+attached to `prod`'s backgrounded session, permission-blocked from
+`customer`'s live one. Root bypasses that entirely (root can read any
+user's Xauthority), so the logind-driven scan above finds whoever's
+*actually* active, every time, regardless of who was logged in when
+`setup.sh` last ran. No re-install needed when the desktop user changes —
+this is the one thing in the whole setup designed to self-heal on its own.
+
+One more X11-specific wrinkle root doesn't get a pass on: MIT-SHM (the
+shared-memory framebuffer extension x11vnc prefers for speed) is gated by
+the X server on matching UID, not just a valid Xauth cookie — root gets a
+hard `BadAccess` on `X_ShmAttach` even with the right cookie. `x11vnc` runs
+with `-noshm` here (plain `XGetImage` polling) specifically because of
+that — slower, but SHM literally cannot work across UIDs at all, so it's
+not a tunable trade-off, it's the only way this works cross-user.
 
 **Hardening / conflicts handled:**
 
 - **`gnome-remote-desktop`** ships enabled by default on GNOME and also
-  wants port 5900 — `setup.sh` stops and disables it so it can't fight
-  x11vnc for the port.
+  wants port 5900 — `setup.sh` deliberately does **not** touch it at all,
+  neither `disable`/`mask`-ing the unit nor `pkill`-ing the running
+  process by name. Both were tried and both caused real damage: masking
+  broke GDM's own display-switch handling outright (`GDM_IS_REMOTE_DISPLAY`
+  assertion failures on every switch, cascading into `gnome-shell`
+  crashes); `pkill`-ing it by name was still enough on its own to
+  reproduce the same class of breakage on a later switch, even with the
+  unit correctly unmasked — confirmed by a clean A/B test (uninstalled →
+  switching worked fine; re-ran `setup.sh` → broke again on the very next
+  switch). If it's actually holding port 5900, the `fuser` port-clear
+  further down handles that surgically, on the one port that matters,
+  instead of broadly targeting a GNOME session process by name.
 - **Stray processes from a previous run** (a manual test, an earlier
   failed `setup.sh` attempt) can be left holding 5900/6080, which would
   otherwise put the managed systemd units into an endless
@@ -265,9 +370,17 @@ under `systemctl --user` for `$DESKTOP_USER`, and
   binary, falling back to noVNC's bundled
   `/usr/share/novnc/utils/websockify/run` if that's what's present.
 - **Wayland**: x11vnc is an X11 tool — under Wayland it only sees XWayland
-  (compatibility-layer) windows, not the compositor's real desktop. There
-  is no fix for this short of the user's session being Xorg — `setup.sh`
-  detects and warns but can't work around it.
+  (compatibility-layer) windows, not the compositor's real desktop, and it
+  fails *silently*: `who` reports a tty rather than a `:N` display for a
+  Wayland session, so the wrapper never finds a display and retries forever
+  with no error. The installer sets `WaylandEnable=false` in
+  `/etc/gdm3/custom.conf` — machine-wide, covering every account including
+  ones created later. A per-user AccountsService `Session=ubuntu-xorg` is
+  also written for the detected desktop user, but that alone is not enough
+  on a multi-user VS: it only covers whoever was at the seat during install,
+  and the next user to log in would get Ubuntu's Wayland default. Both take
+  effect at the next login/reboot — no `gdm` restart is issued, since that
+  would kick off whoever is currently logged in.
 
 ### Prerequisites
 
@@ -370,8 +483,17 @@ no manual per-VS role edit.
 - **x11vnc / noVNC ports blocked on repeated `setup.sh` runs**: a stray
   process from a prior run can hold port 5900/6080 forever — `setup.sh`
   force-kills both ports before starting its own.
-- **`gnome-remote-desktop` conflicts on port 5900**: `setup.sh` explicitly
-  stops + disables it.
+- **`gnome-remote-desktop` conflicts on port 5900**: `setup.sh` doesn't
+  touch it at all now — neither masking the unit nor `pkill`-ing the
+  process, both caused the same GDM display-switch corruption on this
+  Ubuntu/GNOME version, confirmed by a clean before/after
+  `uninstall.sh`/`setup.sh` test. A real, reboot-and-lose-the-session-level
+  regression to avoid repeating — let the `fuser` port-clear handle any
+  actual conflict instead.
+- **Remote Desktop shows a black screen after the desktop user changes**:
+  fixed by moving x11vnc/websockify off per-user `systemctl --user` onto
+  root-run system services — was a real, recurring bug when this ran as
+  whichever single account was detected at install time.
 - **Wayland sessions**: x11vnc only sees XWayland windows — use an Xorg
   session for full desktop sharing.
 - **Package version drift across Ubuntu releases**: `novnc` is
