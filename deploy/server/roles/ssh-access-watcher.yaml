@@ -2,7 +2,9 @@ kind: role
 version: v7
 metadata:
   name: ssh-access-watcher
-  description: Machine identity for the ssh-access-watcher automation. Watches node registrations and appends new VS logins to the ssh-access role. Not for human use.
+  description: >-
+    Background robot account. Not for people — auto-updates the SSH
+    login list when new servers join.
 spec:
   allow:
     rules:

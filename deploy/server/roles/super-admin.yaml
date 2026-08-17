@@ -2,7 +2,9 @@ kind: role
 version: v7
 metadata:
   name: super-admin
-  description: Full cluster admin — editor + access + auditor + root SSH on all nodes
+  description: >-
+    Full control. Can SSH into any server as root, manage users/roles,
+    view all session recordings and logs, change any cluster setting.
 spec:
   allow:
     # root: full SSH access to every VS node

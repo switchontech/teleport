@@ -2,7 +2,9 @@ kind: role
 version: v7
 metadata:
   name: cloud-admin-full-access
-  description: Cloud admin — SSH + app access to all nodes, audit log read, no root
+  description: >-
+    Manage servers, no root. Can SSH into any server (not as root),
+    add/remove servers and apps, view session recordings and logs.
 spec:
   allow:
     # customer: standard shared VS login

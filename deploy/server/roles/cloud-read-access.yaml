@@ -2,7 +2,9 @@ kind: role
 version: v7
 metadata:
   name: cloud-read-access
-  description: Read-only cloud access — SSH into VS nodes, view sessions and audit log, no config changes
+  description: >-
+    Can SSH into servers and view session recordings/logs.
+    Cannot add, remove, or change anything.
 spec:
   allow:
     # customer: standard shared VS login
