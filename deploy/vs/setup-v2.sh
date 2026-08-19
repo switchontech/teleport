@@ -8,10 +8,16 @@
 # If the server's PUBLIC_ADDR or VS_JOIN_TOKEN in .env ever changes, re-run
 # on the server: bash bake.sh   — it rewrites these three values below in
 # place.
+#
+# Design note: this script never sends a signal to any process. Process
+# lifecycle is entirely systemd's job — the x11vnc wrapper exits when it
+# needs to change displays and systemd restarts it. Earlier versions used
+# pkill/kill/fuser -k and every one of them caused collateral damage on a
+# live GNOME session.
 
 set -euo pipefail
 
-[[ $EUID -eq 0 ]] || { echo "ERROR: must run as root. Use: sudo bash setup.sh ..."; exit 1; }
+[[ $EUID -eq 0 ]] || { echo "ERROR: must run as root. Use: sudo bash setup.sh"; exit 1; }
 
 PROXY="172.30.196.160.nip.io:3080"
 TOKEN="vs-join-token-switchon"
@@ -25,25 +31,26 @@ NOVNC_PORT="6080"
 
 PROXY_HOST="${PROXY%%:*}"
 
+# ── Which desktop user to record in the vs-user label ────────────────────────
 # Whoever currently holds the active graphical seat — not whoever ran sudo.
-# This is the desktop that gets shared, regardless of which account installs it.
+# Note: "active" and "online" are different logind states. active = the
+# session currently on the seat (on screen); online = logged in but
+# backgrounded. With two users logged in simultaneously BOTH are listed and
+# only one is active, so keying on "online" would match either at random.
+# The -n "$session_seat" test additionally rejects SSH sessions, which have
+# no seat but can still report State=active.
 DESKTOP_USER=""
+SESSION_TYPE_DETECTED=""
 for session in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
     session_state=$(loginctl show-session "$session" -p State --value 2>/dev/null || true)
     session_type=$(loginctl show-session "$session" -p Type --value 2>/dev/null || true)
     session_seat=$(loginctl show-session "$session" -p Seat --value 2>/dev/null || true)
-    # -n "$session_seat": a real desktop session and an unrelated SSH pts
-    # session can both report State=active simultaneously — only a session
-    # tied to an actual seat is a graphical desktop, not a terminal login.
     if [[ "$session_state" == "active" && ( "$session_type" == "x11" || "$session_type" == "wayland" ) && -n "$session_seat" ]]; then
         session_user=$(loginctl show-session "$session" -p Name --value 2>/dev/null || true)
-        # Skip service/greeter accounts (e.g. gdm's own login-screen session,
-        # which can also report as an "active" x11/wayland session) — only
-        # accept real human logins (UID >= 1000, standard Debian/Ubuntu convention).
+        # Skip service/greeter accounts (gdm's own login-screen session also
+        # reports as an active x11 session) — real human logins are UID >= 1000.
         session_uid=$(id -u "$session_user" 2>/dev/null || echo -1)
-        if [[ "$session_uid" -lt 1000 ]]; then
-            continue
-        fi
+        [[ "$session_uid" -lt 1000 ]] && continue
         DESKTOP_USER="$session_user"
         SESSION_TYPE_DETECTED="$session_type"
         break
@@ -51,12 +58,12 @@ for session in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1
 done
 if [[ -z "$DESKTOP_USER" ]]; then
     DESKTOP_USER="${SUDO_USER:-$USER}"
-    echo "WARNING: no active graphical session found via loginctl. Falling back to: $DESKTOP_USER"
+    echo "WARNING: no active graphical session found. Falling back to: $DESKTOP_USER"
 else
-    echo "Active desktop session found: user=$DESKTOP_USER type=$SESSION_TYPE_DETECTED"
+    echo "Active desktop session: user=$DESKTOP_USER type=$SESSION_TYPE_DETECTED"
     if [[ "$SESSION_TYPE_DETECTED" == "wayland" ]]; then
         echo "WARNING: session is Wayland, not Xorg. x11vnc needs a real X11 session —"
-        echo "         it will likely only capture XWayland windows, not the full desktop."
+        echo "         it will only capture XWayland windows, not the full desktop."
     fi
 fi
 
@@ -150,8 +157,7 @@ apt-get update -qq
 # Pin exact package versions per supported Ubuntu release — apt package
 # versions differ across releases (confirmed: novnc 1:1.0.0-5 on 22.04 vs
 # 1:1.3.0-2 on 24.04), so an unpinned install silently drifts per-machine.
-# Fail loudly on any release we haven't pinned versions for, rather than
-# installing whatever apt happens to resolve.
+# Fail loudly on any release we haven't pinned versions for.
 . /etc/os-release
 case "$VERSION_ID" in
     22.04)
@@ -166,7 +172,7 @@ case "$VERSION_ID" in
         ;;
     *)
         echo "ERROR: Ubuntu $VERSION_ID is not a supported/pinned release for this installer."
-        echo "       Supported: 22.04, 24.04. Add pinned versions here if you need to support it."
+        echo "       Supported: 22.04, 24.04. Add pinned versions here if you need it."
         exit 1
         ;;
 esac
@@ -182,8 +188,6 @@ ENHANCED_RECORDING_ENABLED="true"
 if [[ ! -e /sys/kernel/btf/vmlinux ]]; then
     echo "WARNING: /sys/kernel/btf/vmlinux not found — kernel lacks BTF, command"
     echo "         recording (enhanced_recording) will fail to start. Disabling it."
-    echo "         (Needs a kernel built with CONFIG_DEBUG_INFO_BTF=y, e.g. stock"
-    echo "         Ubuntu 20.04+ kernels.)"
     ENHANCED_RECORDING_ENABLED="false"
 fi
 
@@ -220,173 +224,166 @@ app_service:
         env: plant
 EOF
 
-echo "=== [5/6] Setting up x11vnc + websockify (system-level, runs as root) ==="
+echo "=== [5/6] Setting up x11vnc + websockify (system-level, run as root) ==="
 
-# Run as root, not as $DESKTOP_USER — deliberately. Whoever's actually at the
-# desktop changes over the VS's lifetime (that's normal, expected use, not an
-# edge case), and a user-level systemd service is pinned to one account
-# forever: it can't read a *different* user's ~/.Xauthority (permission
-# denied, even though the wrapper below already knows to look for it), so
-# switching desktop users produced a black screen until someone noticed and
-# re-ran this whole script. Root bypasses that — it can read any user's
-# Xauthority — so this self-heals to whoever's actually logged in, with no
-# re-install needed when the desktop user changes.
+# Run as root, not as a specific desktop user. Whoever is at the desktop
+# changes over a VS's lifetime, and a `systemctl --user` service is pinned to
+# one account forever — it cannot read another user's ~/.Xauthority (mode
+# 600), so a user switch left the share attached to a dead session. Root can
+# read any user's Xauthority, so one service follows whoever is actually
+# logged in.
 #
-# Deliberately not touching gnome-remote-desktop at all — not masking it
-# (that broke GDM's own display-switch handling outright, see git history)
-# and not even pkill-ing it by name (abruptly killing a process that may be
-# mid-registration with gnome-shell over D-Bus is the same category of risk
-# via a different mechanism). If it's actually holding port 5900, the
-# fuser port-clear further down handles that surgically, on the one port
-# that matters, rather than broadly targeting a process by name.
+# Deliberately NOT touching gnome-remote-desktop. Masking its unit broke
+# GDM's display-switch handling outright; pkill-ing it by name was no safer.
+# If it holds port 5900 the check below reports it rather than killing it.
 
-# Wrapper: re-scans for the live display AND whichever user currently owns
-# it on every attempt (not just once at startup) — so a desktop-user switch
-# while this is already running gets picked up on the next retry once the
-# old X session tears down, no restart of this script required.
+# Clear out per-user units from older versions of this installer, which
+# installed into the detected desktop user's home — including gdm's own home
+# (/var/lib/gdm3) if it ran before the UID >= 1000 filter existed. Left in
+# place they compete with the system-level units for ports 5900/6080 and can
+# sit in a permanent systemd restart loop. Removing files only, no signals —
+# `systemctl --user disable` without --now leaves running processes alone,
+# and they go away on next logout/reboot.
+while IFS=: read -r u _ uid _ _ home _; do
+    [[ -n "$home" && -d "$home" ]] || continue
+    unit_dir="$home/.config/systemd/user"
+    [[ -f "$unit_dir/x11vnc.service" || -f "$unit_dir/websockify.service" ]] || continue
+    echo "  Removing legacy per-user units for $u ($unit_dir)"
+    if [[ -d "/run/user/$uid" ]]; then
+        sudo -u "$u" XDG_RUNTIME_DIR="/run/user/$uid" \
+            systemctl --user disable x11vnc websockify 2>/dev/null || true
+    fi
+    rm -f "$unit_dir/x11vnc.service" "$unit_dir/websockify.service"
+    # Linger was only ever enabled to keep those units alive.
+    loginctl disable-linger "$u" 2>/dev/null || true
+done < <(getent passwd)
+
+# ── The x11vnc wrapper ───────────────────────────────────────────────────────
 cat > /usr/local/bin/x11vnc-start.sh <<'WRAPPER'
 #!/bin/bash
-# A watchdog, not a one-shot launcher: `exec`ing straight into x11vnc would
-# hand this process over permanently to whichever session was active the
-# moment it started, with nothing left running to notice a later switch.
-# Instead this stays alive as x11vnc's supervisor, re-checking who's
-# actually active every few seconds and restarting x11vnc itself the moment
-# that changes — a live switch takes effect within one poll interval, not
-# "next time the service happens to restart."
-CURRENT_DISPLAY=""
-X11VNC_PID=""
-PENDING_DISPLAY=""
-PENDING_COUNT=0
+# Attaches x11vnc to whichever graphical session is currently ACTIVE on the
+# seat, and exits when that stops being true so systemd can restart it
+# against the new one.
+#
+# This script never signals a process. When the active display changes it
+# just exits; systemd tears down the rest of the cgroup (x11vnc included)
+# and Restart=always brings up a clean instance. That is deliberate — every
+# earlier version that issued kill/pkill itself caused collateral damage on
+# a live GNOME session.
 
-# Never trust a bare PID number across a sleep — if x11vnc exits between
-# polls, the kernel can and does reuse that PID for a completely unrelated
-# process. `kill -0` only proves *a* process with that number exists, not
-# that it's still x11vnc. Checking /proc's comm before every kill/wait is
-# what makes it safe to hold onto a PID across the 5s poll interval at all.
-is_our_x11vnc() {
-    [[ -n "$1" ]] && [[ "$(cat "/proc/$1/comm" 2>/dev/null)" == "x11vnc" ]]
-}
+POLL_SECONDS=5
 
-cleanup() {
-    is_our_x11vnc "$X11VNC_PID" && kill "$X11VNC_PID" 2>/dev/null
-    exit 0
-}
-trap cleanup TERM INT
-
-while true; do
-    # Ask logind directly which session is the one actually active on the
-    # seat right now, rather than guessing a display number. Fast user
-    # switching (not a logout) leaves the previous user's X server alive in
-    # the background on its own display — a fixed :0/:1/:2 probe finds *an*
-    # X server that answers, not necessarily the one actually on screen.
-    ACTIVE_USER=""
+# Print "<user> <display>" for the session currently on the seat, or nothing.
+#
+# Two lookups, because neither alone is reliable here:
+#   - logind knows which session is *active* (on screen) vs merely *online*
+#     (logged in, backgrounded). Fast user switching leaves the previous
+#     user's X server alive, so "an X server that answers on :0/:1/:2" is
+#     not the same question as "the one on screen".
+#   - logind's own Display property comes back empty for X11 sessions on
+#     some GDM versions, so the display number itself comes from `who`
+#     (utmp), which reports it as the TTY field, e.g. "prod :1".
+active_session() {
+    local session state type seat user uid display
     for session in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
         state=$(loginctl show-session "$session" -p State --value 2>/dev/null || true)
         type=$(loginctl show-session "$session" -p Type --value 2>/dev/null || true)
         seat=$(loginctl show-session "$session" -p Seat --value 2>/dev/null || true)
-        if [[ "$state" == "active" && ( "$type" == "x11" || "$type" == "wayland" ) && -n "$seat" ]]; then
-            sess_user=$(loginctl show-session "$session" -p Name --value 2>/dev/null || true)
-            sess_uid=$(id -u "$sess_user" 2>/dev/null || echo -1)
-            [[ "$sess_uid" -lt 1000 ]] && continue
-            ACTIVE_USER="$sess_user"
+        [[ "$state" == "active" ]] || continue
+        [[ "$type" == "x11" || "$type" == "wayland" ]] || continue
+        [[ -n "$seat" ]] || continue          # rejects SSH sessions
+        user=$(loginctl show-session "$session" -p Name --value 2>/dev/null || true)
+        uid=$(id -u "$user" 2>/dev/null || echo -1)
+        [[ "$uid" -ge 1000 ]] || continue     # rejects gdm's greeter session
+        display=$(who | awk -v u="$user" '$1==u && $2 ~ /^:[0-9]+$/ {print $2; exit}')
+        [[ -n "$display" ]] || continue
+        echo "$user $display"
+        return 0
+    done
+    return 1
+}
+
+# Xauthority for a given user, checked in the order GDM actually uses.
+find_xauth() {
+    local uid="$1" home="$2" f
+    for f in "/run/user/${uid}/gdm/Xauthority" /run/user/${uid}/.mutter-Xwaylandauth* "${home}/.Xauthority"; do
+        [[ -r "$f" ]] && { echo "$f"; return 0; }
+    done
+    return 1
+}
+
+# Wait for a usable active session.
+while true; do
+    if read -r USER_NAME X_DISPLAY < <(active_session); then
+        USER_UID=$(id -u "$USER_NAME")
+        USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
+        if XAUTH=$(find_xauth "$USER_UID" "$USER_HOME") \
+           && XAUTHORITY="$XAUTH" DISPLAY="$X_DISPLAY" xdpyinfo >/dev/null 2>&1; then
             break
         fi
-    done
+    fi
+    echo "No usable active graphical session yet, retrying in ${POLL_SECONDS}s..."
+    sleep "$POLL_SECONDS"
+done
 
-    X_DISPLAY=""
-    if [[ -n "$ACTIVE_USER" ]]; then
-        ACTIVE_UID=$(id -u "$ACTIVE_USER")
-        ACTIVE_HOME=$(eval echo "~$ACTIVE_USER")
-        # logind's own Display property comes back empty for X11 sessions
-        # on some GDM/logind versions — `who` (from utmp, a separate
-        # mechanism) reliably reports it as the TTY field for a
-        # display-manager session, e.g. "prod :1", "customer :3".
-        X_DISPLAY=$(who | awk -v u="$ACTIVE_USER" '$1==u && $2 ~ /^:[0-9]+$/ {print $2; exit}')
+if ss -ltn "sport = :5900" 2>/dev/null | grep -q LISTEN; then
+    echo "WARNING: something is already listening on port 5900 (gnome-remote-desktop?)."
+    echo "         x11vnc will fail to bind. Not killing it — stop it yourself if unwanted."
+fi
 
-        XAUTH=""
-        for f in "/run/user/${ACTIVE_UID}/gdm/Xauthority" /run/user/${ACTIVE_UID}/.mutter-Xwaylandauth* "${ACTIVE_HOME}/.Xauthority"; do
-            [ -r "$f" ] && XAUTH="$f" && break
-        done
+echo "Starting x11vnc for $USER_NAME on display $X_DISPLAY (auth: $XAUTH)"
 
-        if [[ -n "$X_DISPLAY" ]] && ! XAUTHORITY="$XAUTH" DISPLAY="$X_DISPLAY" xdpyinfo >/dev/null 2>&1; then
-            X_DISPLAY=""
+# Flag rationale:
+#   -noshm    MIT-SHM is gated on matching UID, not just a valid Xauth cookie.
+#             Running as root against another user's display gets BadAccess on
+#             X_ShmAttach. Falls back to plain XGetImage polling — slower, but
+#             SHM cannot work cross-UID at all.
+#   -noscr    Disables scroll detection, which taps the X server's entire
+#             event stream via the RECORD extension.
+#   -nowf     Disables wireframe window moves.
+#   -nowcr    Disables copyrect-after-move.
+# (Dropped -nograbs: not a recognized option on the pinned x11vnc build —
+# it exits immediately with "unrecognized option(s)", which looked from the
+# outside like x11vnc silently dying every restart cycle.)
+/usr/bin/x11vnc \
+    -display "$X_DISPLAY" \
+    -auth "$XAUTH" \
+    -noshm -noscr -nowf -nowcr \
+    -nopw -forever -shared \
+    -rfbport 5900 -localhost &
+VNC_PID=$!
+
+# Watch for the active session changing. On any change, exit — systemd stops
+# the rest of the cgroup and restarts us clean. `ps` only reads /proc, it
+# does not signal anything.
+while true; do
+    sleep "$POLL_SECONDS"
+
+    if [[ "$(ps -p "$VNC_PID" -o comm= 2>/dev/null)" != "x11vnc" ]]; then
+        echo "x11vnc is gone — exiting so systemd restarts cleanly."
+        exit 0
+    fi
+
+    if read -r NOW_USER NOW_DISPLAY < <(active_session); then
+        if [[ "$NOW_DISPLAY" != "$X_DISPLAY" ]]; then
+            echo "Active session moved to $NOW_USER on $NOW_DISPLAY — exiting so systemd reattaches."
+            exit 0
         fi
+    else
+        echo "No active graphical session — exiting so systemd reattaches when one returns."
+        exit 0
     fi
-
-    x11vnc_alive=false
-    is_our_x11vnc "$X11VNC_PID" && x11vnc_alive=true
-
-    # Stop the instant the target changes at all — no debounce on this
-    # side. A client actively watching (not just x11vnc sitting idle)
-    # means it's continuously hammering the X server with XGetImage/XDamage
-    # requests (no SHM, remember, so this is real protocol traffic, not a
-    # zero-copy read) for as long as it's attached. Letting it keep polling
-    # a display for even one extra 5s interval after that session starts
-    # transitioning away is what let it catch GDM/mutter mid VT-switch and
-    # throw a BadWindow — which cascaded into gnome-shell crashing and
-    # GDM's own display-switch handling breaking outright. Confirmed by
-    # testing: closing the viewer before switching never triggers this;
-    # only an actively-connected client does.
-    if $x11vnc_alive && [[ "$X_DISPLAY" != "$CURRENT_DISPLAY" ]]; then
-        echo "Active session changed away from $CURRENT_DISPLAY — stopping x11vnc immediately"
-        kill "$X11VNC_PID" 2>/dev/null
-        wait "$X11VNC_PID" 2>/dev/null
-        X11VNC_PID=""
-        CURRENT_DISPLAY=""
-        x11vnc_alive=false
-    fi
-
-    if [[ -z "$X_DISPLAY" ]]; then
-        PENDING_DISPLAY=""
-        PENDING_COUNT=0
-        sleep 5
-        continue
-    fi
-
-    if $x11vnc_alive; then
-        sleep 5
-        continue
-    fi
-
-    # Debounce only applies to *starting* — require the target to hold
-    # steady for two consecutive polls (~5-10s) before attaching, so a
-    # session isn't grabbed mid VT-switch-in either, on the way up.
-    if [[ "$X_DISPLAY" != "$PENDING_DISPLAY" ]]; then
-        PENDING_DISPLAY="$X_DISPLAY"
-        PENDING_COUNT=1
-        sleep 5
-        continue
-    fi
-    PENDING_COUNT=$((PENDING_COUNT + 1))
-    if [[ "$PENDING_COUNT" -lt 2 ]]; then
-        sleep 5
-        continue
-    fi
-
-    echo "Starting x11vnc for $ACTIVE_USER on display $X_DISPLAY with auth $XAUTH"
-    # -noshm: MIT-SHM is a separate check from Xauth — the X server only
-    # grants shared-memory framebuffer access to the session's own UID, no
-    # exception for a valid cookie. Running as root (a different UID than
-    # whichever user is actually logged in) hits BadAccess on X_ShmAttach
-    # without this flag. Slower fallback (plain XGetImage polling) but the
-    # only way this works across users at all.
-    /usr/bin/x11vnc \
-        -display "$X_DISPLAY" \
-        -auth "$XAUTH" \
-        -noshm \
-        -nopw -forever -shared \
-        -rfbport 5900 -localhost &
-    X11VNC_PID=$!
-    CURRENT_DISPLAY="$X_DISPLAY"
-
-    sleep 5
 done
 WRAPPER
 chmod +x /usr/local/bin/x11vnc-start.sh
 
+# After=network.target, NOT graphical.target: graphical.target itself requires
+# multi-user.target, so ordering after it while being WantedBy=multi-user.target
+# is a dependency cycle. systemd breaks such cycles by deleting a job, which
+# silently left this service dead after boot.
 cat > /etc/systemd/system/x11vnc.service <<EOF
 [Unit]
-Description=x11vnc — share whichever desktop session is currently active
+Description=x11vnc — shares whichever desktop session is currently active
 After=network.target
 
 [Service]
@@ -398,7 +395,8 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# websockify binary: prefer python3-websockify, fall back to novnc bundled
+# websockify binary: prefer the python3-websockify package, fall back to the
+# copy bundled with noVNC.
 WEBSOCKIFY_BIN=$(command -v websockify || command -v /usr/share/novnc/utils/websockify/run || echo websockify)
 
 cat > /etc/systemd/system/websockify.service <<EOF
@@ -409,7 +407,7 @@ After=network.target
 [Service]
 ExecStart=${WEBSOCKIFY_BIN} --web /usr/share/novnc ${NOVNC_PORT} localhost:${VNC_PORT}
 Restart=always
-RestartSec=3
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -447,5 +445,7 @@ echo "=============================="
 echo "VS setup complete: ${VS_NAME}"
 echo "SSH:     Teleport → Servers → ${VS_NAME}"
 echo "Desktop: Teleport → Applications → ${VS_NAME}"
+echo ""
+echo "Watch the screen-share follow user switches with:"
+echo "  journalctl -u x11vnc -f"
 echo "=============================="
-sudo journalctl -f -o short-precise --no-hostname > /tmp/crash-capture.log 2>&1 & echo "capturing, PID $!"

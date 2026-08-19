@@ -3,69 +3,15 @@
 # Proxy/token/CA-pin are baked in below — copy this one file to any VS machine
 # and run it, nothing else needed.
 #
-# Usage: sudo bash setup.sh   (VS identity is always this machine's hostname)
+# Usage: sudo bash setup.sh   (VS identity = the first linux user)
 #
-# If the server's PUBLIC_ADDR or VS_JOIN_TOKEN in .env ever changes, re-run
-# on the server: bash bake.sh   — it rewrites these three values below in
-# place.
+# If the server's PUBLIC_ADDR or VS_JOIN_TOKEN in .env changes, re-run on the
+# server: bash bake.sh — it rewrites the three values below in place.
+
+# The screen share follows a fast user switch, but only ~6s AFTER the new
+# session settles.
 #
-# Design note (v4): v3 plus a separate watcher unit that reattaches x11vnc
-# after a user switch — but only once the new session has FULLY SETTLED.
-#
-# v4 is an experiment with a specific question to answer. Observed history:
-#   v1  killed x11vnc the instant a switch was detected          -> GNOME broke
-#   v2  exited instead, systemd's cgroup teardown killed it      -> GNOME broke
-#   v3  never tears down at all                                  -> nothing breaks,
-#                                                                   but never follows
-#
-# In v1/v2 the switch AWAY worked fine — the new user's screen appeared
-# correctly. The breakage showed up on switching BACK to the earlier user.
-# Two mechanisms explain that, and they need different fixes:
-#
-#   (a) RESIDUE. Killing x11vnc while it is attached to a session leaves
-#       state behind in that session's X server (XTEST fake-input state is
-#       server-global and is NOT reset when a client disconnects; x11vnc also
-#       disables keyboard autorepeat and warns its own restore is unreliable).
-#       Invisible while that session is backgrounded; surfaces on return.
-#
-#   (b) TIMING. x11vnc reattaches to the returning session while it is still
-#       reacquiring DRM master, and disturbs the handoff.
-#
-# v4 tests (b): the teardown and the reattach both happen well AFTER the
-# transition finishes, instead of inside it. If switching back now works, it
-# was (b) and this is the fix. If it still breaks, it was (a) — and the answer
-# is a per-session agent architecture (one x11vnc per user, owned by that
-# user's own session), not more retiming.
-#
-# Deliberately NOT changing the x11vnc flags here (no -repeat, no -clear_all).
-# Those target mechanism (a). Changing both at once would make the result
-# uninterpretable.
-#
-# Rollback: re-run setup-v3.sh. It ships no watcher, and its install disables
-# and removes this one.
-#
-# Consequence, and this is the intended operating procedure: switching users
-# while a VNC session is live does NOT move the share to the new user. The
-# viewer keeps seeing the old, now-backgrounded session — a stale frame,
-# black, or that user's lock screen, depending on DPMS and whether GNOME
-# locked on switch. Note this means a remote operator who connects after a
-# switch may be looking at the PREVIOUS user's desktop, not the current one.
-# To hand the machine over, LOG OUT rather than switch users: the X server
-# dies, x11vnc dies with it, systemd restarts this wrapper, and it attaches
-# to whoever logs in next.
-#
-# Why give up automatic switching: every version that reattached mid-switch
-# (v1 killed x11vnc directly, v2 exited and let systemd's cgroup teardown do
-# it) left the returned-to GNOME session broken — first a GDM display-switch
-# crash, then a desktop that renders but accepts no input.
-#
-# Scope of the fix, stated honestly: under the documented procedure (logout,
-# never switch) x11vnc is never running during a VT switch, so the failure
-# window does not occur. If someone switches ANYWAY with a viewer attached,
-# v3 does not protect that path — x11vnc keeps polling the backgrounded
-# display with XGetImage right through the switch, which is the exact
-# condition v1/v2 tried to mitigate and v3 has no mitigation for. v3 relies
-# on the operating procedure, not on being safe under a switch.
+
 
 set -euo pipefail
 
@@ -75,23 +21,60 @@ PROXY="172.30.196.160.nip.io:3080"
 TOKEN="vs-join-token-switchon"
 CA_PIN="sha256:d34246f0cde514c311315c5c3e234ef96d3592d9b9c499fc60c45010242dc7cf"
 
-VS_NAME="$(hostname)"
-
 TELEPORT_VERSION="18.10.0"
 VNC_PORT="5900"
 NOVNC_PORT="6080"
 
 PROXY_HOST="${PROXY%%:*}"
 
-# ── Which desktop user to record in the vs-user label ────────────────────────
-# Whoever currently holds the active graphical seat — not whoever ran sudo.
-# Note: "active" and "online" are different logind states. active = the
-# session currently on the seat (on screen); online = logged in but
-# backgrounded. With two users logged in simultaneously BOTH are listed and
-# only one is active, so keying on "online" would match either at random.
-# The -n "$session_seat" test additionally rejects SSH sessions, which have
-# no seat but can still report State=active.
-DESKTOP_USER=""
+# ── Release gate ─────────────────────────────────────────────────────────────
+# Versions pinned per release: apt resolves different ones per release and
+# x11vnc's accepted flags differ between builds.
+# Runs first, before anything is modified — it used to sit after the GDM and
+# Teleport changes, so an unsupported release left the machine half-configured.
+. /etc/os-release
+case "$VERSION_ID" in
+    22.04)
+        X11VNC_VER="0.9.16-8"
+        NOVNC_VER="1:1.0.0-5"
+        WEBSOCKIFY_VER="0.10.0+dfsg1-2build1"
+        ;;
+    24.04)
+        X11VNC_VER="0.9.16-10"
+        NOVNC_VER="1:1.3.0-2"
+        WEBSOCKIFY_VER="0.10.0+dfsg1-5build2"
+        ;;
+    *)
+        echo "ERROR: Ubuntu $VERSION_ID is not a supported/pinned release."
+        echo "       Supported: 22.04, 24.04. Nothing has been modified."
+        exit 1
+        ;;
+esac
+
+# ── VS identity = first linux user (lowest UID >= 1000) ──────────────────────
+# Feeds the node name, the app public_addr, and the vs-user label.
+# Read from /etc/passwd so it is identical on every run: it used to come from
+# whoever held the desktop, so an update from a `customer` session renamed the
+# node and granted `customer` cluster-wide SSH via ssh-access-watcher.
+# The screen share does not use this — it re-derives the live session at runtime.
+FIRST_USER=$(getent passwd \
+    | awk -F: '$3 >= 1000 && $3 < 65534 { print $3":"$1 }' \
+    | sort -n | head -1 | cut -d: -f2)
+
+if [[ -z "$FIRST_USER" ]]; then
+    echo "ERROR: no human user account found (UID >= 1000). Cannot derive VS identity."
+    echo "       Create the primary user account before running this installer."
+    exit 1
+fi
+
+VS_NAME="$FIRST_USER"
+echo "VS identity: ${VS_NAME} (first linux user, UID $(id -u "$FIRST_USER"))"
+
+# ── Session type on the seat (Xorg vs Wayland) ───────────────────────────────
+# Only used for the REBOOT REQUIRED warning at the end. No username is recorded.
+# state==active, not "online": both are listed when two users are logged in and
+# only one is on screen. -n "$session_seat" rejects SSH sessions, which have no
+# seat but can still report active.
 SESSION_TYPE_DETECTED=""
 for session in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
     session_state=$(loginctl show-session "$session" -p State --value 2>/dev/null || true)
@@ -103,80 +86,78 @@ for session in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1
         # reports as an active x11 session) — real human logins are UID >= 1000.
         session_uid=$(id -u "$session_user" 2>/dev/null || echo -1)
         [[ "$session_uid" -lt 1000 ]] && continue
-        DESKTOP_USER="$session_user"
         SESSION_TYPE_DETECTED="$session_type"
         break
     fi
 done
-if [[ -z "$DESKTOP_USER" ]]; then
-    DESKTOP_USER="${SUDO_USER:-$USER}"
-    echo "WARNING: no active graphical session found. Falling back to: $DESKTOP_USER"
-else
-    echo "Active desktop session: user=$DESKTOP_USER type=$SESSION_TYPE_DETECTED"
-    if [[ "$SESSION_TYPE_DETECTED" == "wayland" ]]; then
-        echo "WARNING: session is Wayland, not Xorg. x11vnc needs a real X11 session —"
-        echo "         it will only capture XWayland windows, not the full desktop."
-    fi
-fi
 
-# ── Force Xorg for $DESKTOP_USER ─────────────────────────────────────────────
-# Applies unconditionally, not just when Wayland was detected above: even if
-# no session was active at all (freshly rebooted/idle-locked VS), the next
-# time $DESKTOP_USER does log in, it should be Xorg so x11vnc can capture
-# the full desktop instead of just XWayland windows.
-#
-# Config only, no gdm restart here: if $DESKTOP_USER's session IS currently
-# active (the Wayland-warning case above), restarting gdm now would kick
-# them off mid-use — the exact collateral damage this script avoids
-# everywhere else. Takes effect on the next natural login/reboot instead.
+# ── Force Xorg for every human account ───────────────────────────────────────
+# x11vnc cannot capture a Wayland desktop, and the next person to log in is
+# unknown at install time — so pin every account, not just the current one.
+# Config only, no gdm restart: that would kick off whoever is logged in now.
 XORG_SESSION=""
 for candidate in ubuntu-xorg gnome-xorg; do
     [[ -f "/usr/share/xsessions/${candidate}.desktop" ]] && { XORG_SESSION="$candidate"; break; }
 done
 if [[ -n "$XORG_SESSION" ]]; then
     ACCT_DIR="/var/lib/AccountsService/users"
-    ACCT_FILE="${ACCT_DIR}/${DESKTOP_USER}"
     mkdir -p "$ACCT_DIR"
-    if [[ -f "$ACCT_FILE" ]]; then
-        grep -q '^Session=' "$ACCT_FILE" \
-            && sed -i "s/^Session=.*/Session=${XORG_SESSION}/" "$ACCT_FILE" \
-            || sed -i "/^\[User\]/a Session=${XORG_SESSION}" "$ACCT_FILE"
-        grep -q '^XSession=' "$ACCT_FILE" \
-            && sed -i "s/^XSession=.*/XSession=${XORG_SESSION}/" "$ACCT_FILE" \
-            || sed -i "/^\[User\]/a XSession=${XORG_SESSION}" "$ACCT_FILE"
-    else
-        cat > "$ACCT_FILE" <<ACCTEOF
+    while IFS=: read -r acct_user _ acct_uid _ _ _ _; do
+        [[ "$acct_uid" -ge 1000 && "$acct_uid" -lt 65534 ]] || continue
+        ACCT_FILE="${ACCT_DIR}/${acct_user}"
+        if [[ -f "$ACCT_FILE" ]]; then
+            grep -q '^Session=' "$ACCT_FILE" \
+                && sed -i "s/^Session=.*/Session=${XORG_SESSION}/" "$ACCT_FILE" \
+                || sed -i "/^\[User\]/a Session=${XORG_SESSION}" "$ACCT_FILE"
+            grep -q '^XSession=' "$ACCT_FILE" \
+                && sed -i "s/^XSession=.*/XSession=${XORG_SESSION}/" "$ACCT_FILE" \
+                || sed -i "/^\[User\]/a XSession=${XORG_SESSION}" "$ACCT_FILE"
+        else
+            cat > "$ACCT_FILE" <<ACCTEOF
 [User]
 Session=${XORG_SESSION}
 XSession=${XORG_SESSION}
 SystemAccount=false
 ACCTEOF
-    fi
-    echo "Default session for $DESKTOP_USER set to '${XORG_SESSION}' (takes effect next login)."
+        fi
+        echo "  Default session for $acct_user set to '${XORG_SESSION}'."
+    done < <(getent passwd)
+    echo "Xorg pinned for all human accounts (takes effect next login)."
 else
-    echo "WARNING: no Xorg session found (checked ubuntu-xorg, gnome-xorg) — cannot force Xorg default."
+    echo "WARNING: no Xorg session found (checked ubuntu-xorg, gnome-xorg)."
+    echo "         Cannot force an Xorg default, and Wayland will NOT be disabled"
+    echo "         below — disabling it with no X11 session to fall back to would"
+    echo "         leave GDM nothing to launch and lock everyone out of the desktop."
 fi
 
 # ── Disable Wayland at GDM, for every account on the machine ─────────────────
-# The AccountsService block above only covers $DESKTOP_USER — whoever happened
-# to be at the seat when this installer ran. Any other account that logs in
-# later gets Ubuntu's default, which is Wayland, and a Wayland session breaks
-# the screen share SILENTLY rather than loudly: `who` reports a tty instead of
-# a ":N" display for Wayland sessions, so the x11vnc wrapper never finds a
-# display to attach to and just retries forever with no error. (Even if it did
-# attach, x11vnc only captures XWayland windows, not the desktop.)
+# Belt and braces alongside the AccountsService pin above: that sets a per-user
+# default, this removes Wayland as an option at the display manager, including
+# for accounts created after this installer ran. A Wayland session breaks the
+# screen share SILENTLY rather than loudly — `who` reports a tty instead of a
+# ":N" display, so the x11vnc wrapper never finds a display to attach to and
+# just retries forever with no error. (Even if it did attach, x11vnc only
+# captures XWayland windows, not the desktop.)
 #
-# This matters most for v3's logout-to-hand-over flow: the whole point is that
-# the NEXT user to log in gets picked up automatically, and that next user is
-# by definition not necessarily $DESKTOP_USER.
+# It matters because the share follows whoever logs in next, and that account
+# is not known at install time.
 #
 # No gdm restart here: that would kill the session of whoever is logged in
 # right now. Takes effect at the next login/reboot, same as the per-user
 # default above.
+#
+# GATED on an Xorg session actually existing. Disabling Wayland on a machine
+# that has no X11 session installed leaves GDM with nothing to launch — the
+# login screen breaks and every fix needs physical access to the machine.
+# Stock 22.04/24.04 always ship ubuntu-xorg.desktop, so this is insurance
+# rather than a live bug — but these are custom remastered images, and
+# remasters strip packages.
 GDM_CONF=""
-for candidate in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
-    [[ -f "$candidate" ]] && { GDM_CONF="$candidate"; break; }
-done
+if [[ -n "$XORG_SESSION" ]]; then
+    for candidate in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
+        [[ -f "$candidate" ]] && { GDM_CONF="$candidate"; break; }
+    done
+fi
 if [[ -n "$GDM_CONF" ]]; then
     if grep -qE '^[[:space:]]*WaylandEnable[[:space:]]*=' "$GDM_CONF"; then
         # An active setting already exists — force it to false whatever it said.
@@ -195,6 +176,10 @@ if [[ -n "$GDM_CONF" ]]; then
         echo "ERROR: failed to set WaylandEnable=false in $GDM_CONF — check it by hand."
         exit 1
     fi
+elif [[ -z "$XORG_SESSION" ]]; then
+    echo "SKIPPED disabling Wayland at GDM: no Xorg session exists to fall back to."
+    echo "        Install an Xorg session (gnome-session-xsession) and re-run, or"
+    echo "        the screen share will not work on this machine."
 else
     echo "WARNING: no GDM config found (checked /etc/gdm3/custom.conf, /etc/gdm/custom.conf)."
     echo "         Cannot force Xorg machine-wide. If any user logs in under Wayland,"
@@ -205,36 +190,48 @@ echo "=== [1/6] Installing Teleport $TELEPORT_VERSION ==="
 curl -fsSL https://goteleport.com/static/install.sh | bash -s "$TELEPORT_VERSION"
 
 echo "=== [2/6] Installing x11vnc + noVNC + websockify ==="
-apt-get update -qq
+# `|| true`: a single unreachable third-party repo would otherwise abort the
+# whole install under `set -e`. If the index really is unusable the pinned
+# installs below fail loudly anyway, so nothing is silently skipped.
+apt-get update -qq || echo "WARNING: apt-get update failed — continuing with the cached index."
 
-# Pin exact package versions per supported Ubuntu release — apt package
-# versions differ across releases (confirmed: novnc 1:1.0.0-5 on 22.04 vs
-# 1:1.3.0-2 on 24.04), so an unpinned install silently drifts per-machine.
-# Fail loudly on any release we haven't pinned versions for.
-. /etc/os-release
-case "$VERSION_ID" in
-    22.04)
-        X11VNC_VER="0.9.16-8"
-        NOVNC_VER="1:1.0.0-5"
-        WEBSOCKIFY_VER="0.10.0+dfsg1-2build1"
-        ;;
-    24.04)
-        X11VNC_VER="0.9.16-10"
-        NOVNC_VER="1:1.3.0-2"
-        WEBSOCKIFY_VER="0.10.0+dfsg1-5build2"
-        ;;
-    *)
-        echo "ERROR: Ubuntu $VERSION_ID is not a supported/pinned release for this installer."
-        echo "       Supported: 22.04, 24.04. Add pinned versions here if you need it."
-        exit 1
-        ;;
-esac
+# x11-utils supplies xdpyinfo. x11vnc only *Recommends* it, so an image built
+# with --no-install-recommends (common for remasters) will not have it — and
+# both x11vnc-start.sh and x11vnc-watch.sh gate every attach on xdpyinfo. Its
+# absence produces the worst failure mode available: the share never attaches,
+# with no error, retrying forever. Install it explicitly.
+EXTRA_PKGS=(psmisc x11-utils)
 
-apt-get install -y \
-    x11vnc="$X11VNC_VER" \
-    novnc="$NOVNC_VER" \
-    python3-websockify="$WEBSOCKIFY_VER" \
-    psmisc
+# Try the pinned versions first (see the release gate at the top for why they
+# are pinned). If the archive has superseded one — a security update lands and
+# the old version is gone — install unpinned rather than aborting the whole
+# provisioning run. The thing pinning actually protects against is a flag/
+# behaviour change, and that is verified directly further down by starting
+# x11vnc with our real flag set, which catches it on any version.
+if ! apt-get install -y \
+        x11vnc="$X11VNC_VER" \
+        novnc="$NOVNC_VER" \
+        python3-websockify="$WEBSOCKIFY_VER" \
+        "${EXTRA_PKGS[@]}"; then
+    echo "WARNING: pinned package versions unavailable for Ubuntu ${VERSION_ID}."
+    echo "         Wanted x11vnc=$X11VNC_VER novnc=$NOVNC_VER websockify=$WEBSOCKIFY_VER"
+    echo "         Falling back to whatever apt resolves. Flags are verified below."
+    apt-get install -y x11vnc novnc python3-websockify "${EXTRA_PKGS[@]}"
+fi
+
+# Prove the flags this installer depends on are accepted by the x11vnc build
+# that actually landed. -nograbs was dropped precisely because it does not
+# exist on every build and makes x11vnc exit immediately with "unrecognized
+# option(s)" — which from the outside looks like x11vnc mysteriously dying on
+# every restart. Catch that here, at install time, rather than in production.
+X11VNC_FLAGS=(-noshm -noscr -nowf -nowcr -nopw -forever -shared)
+if x11vnc "${X11VNC_FLAGS[@]}" -help 2>&1 | grep -qi "unrecognized option"; then
+    echo "ERROR: this x11vnc build rejects one of the flags this installer uses:"
+    echo "       ${X11VNC_FLAGS[*]}"
+    echo "       Check which with: x11vnc ${X11VNC_FLAGS[*]} -help"
+    exit 1
+fi
+echo "x11vnc flag set accepted by $(x11vnc -version 2>&1 | head -1)."
 
 echo "=== [3/6] Checking BPF enhanced session recording support ==="
 ENHANCED_RECORDING_ENABLED="true"
@@ -264,7 +261,7 @@ ssh_service:
     enabled: ${ENHANCED_RECORDING_ENABLED}
   labels:
     vs-id: "${VS_NAME}"
-    vs-user: "${DESKTOP_USER}"
+    vs-user: "${VS_NAME}"
     env: plant
 app_service:
   enabled: true
@@ -466,7 +463,13 @@ Description=websockify noVNC proxy
 After=network.target
 
 [Service]
-ExecStart=${WEBSOCKIFY_BIN} --web /usr/share/novnc ${NOVNC_PORT} localhost:${VNC_PORT}
+# 127.0.0.1:${NOVNC_PORT}, NOT a bare port. websockify's syntax is
+# "[source_addr:]source_port target_addr:target_port" — omitting source_addr
+# binds 0.0.0.0, which published the full noVNC client and a proxy to the
+# desktop on the plant LAN with no authentication at all, bypassing Teleport's
+# auth, RBAC and audit entirely. x11vnc itself was already safe via -localhost;
+# this port was the exposed one.
+ExecStart=${WEBSOCKIFY_BIN} --web /usr/share/novnc 127.0.0.1:${NOVNC_PORT} localhost:${VNC_PORT}
 Restart=always
 RestartSec=5
 
@@ -647,48 +650,118 @@ systemctl restart x11vnc websockify x11vnc-watcher
 echo "=== [6/6] Starting Teleport ==="
 systemctl enable teleport
 
+# --insecure makes the agent skip TLS verification of the proxy certificate —
+# it accepts any cert, including an attacker's. That is fine against a
+# self-signed dev proxy, and unacceptable against a real domain: anyone able to
+# MITM or DNS-spoof the proxy hostname on the plant network could impersonate
+# it and every agent would accept. (ca_pin protects the initial JOIN by
+# verifying the cluster CA; it does not cover ongoing proxy connections.)
+#
+# Decided from the proxy address rather than left as a manual step, so the
+# production cutover cannot forget it: bare IPs and nip.io are dev, a real
+# domain is not.
+TELEPORT_EXTRA_FLAGS=""
+if [[ "$PROXY_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$PROXY_HOST" == *.nip.io || "$PROXY_HOST" == *.sslip.io ]]; then
+    TELEPORT_EXTRA_FLAGS=" --insecure"
+    echo "Proxy '${PROXY_HOST}' looks like a dev address — enabling --insecure (no TLS verification)."
+else
+    echo "Proxy '${PROXY_HOST}' is a real domain — TLS certificate verification ENABLED."
+fi
+
 mkdir -p /etc/systemd/system/teleport.service.d/
-cat > /etc/systemd/system/teleport.service.d/insecure.conf <<'DROPIN'
+cat > /etc/systemd/system/teleport.service.d/insecure.conf <<DROPIN
 [Service]
 ExecStart=
-ExecStart=/usr/local/bin/teleport start --config /etc/teleport.yaml --pid-file=/run/teleport.pid --insecure
+ExecStart=/usr/local/bin/teleport start --config /etc/teleport.yaml --pid-file=/run/teleport.pid${TELEPORT_EXTRA_FLAGS}
 DROPIN
 systemctl daemon-reload
 
 systemctl restart teleport
 sleep 4
-systemctl status teleport --no-pager | head -8
+
+# ── Health check ─────────────────────────────────────────────────────────────
+# Across 200 machines you cannot inspect each one by hand, and the failure
+# modes here are quiet: x11vnc retrying forever with no display to attach to,
+# websockify bind-looping, teleport failing to join. Previously this script
+# printed "VS setup complete" in every one of those cases. Assert instead, and
+# exit non-zero so a provisioning run surfaces the machine that needs looking
+# at.
+echo "=== Health check ==="
+HEALTH_FAILED=0
+check() {
+    local label="$1"; shift
+    if "$@" >/dev/null 2>&1; then
+        echo "  OK    $label"
+    else
+        echo "  FAIL  $label"
+        HEALTH_FAILED=1
+    fi
+}
+
+check "teleport.service active"        systemctl is-active --quiet teleport
+check "x11vnc.service active"          systemctl is-active --quiet x11vnc
+check "websockify.service active"      systemctl is-active --quiet websockify
+check "x11vnc-watcher.service active"  systemctl is-active --quiet x11vnc-watcher
+check "xdpyinfo present"               command -v xdpyinfo
+
+# Give x11vnc a moment to find a session and bind before asserting on ports.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    ss -ltn "sport = :${VNC_PORT}" 2>/dev/null | grep -q LISTEN && break
+    sleep 2
+done
+
+if ss -ltn "sport = :${VNC_PORT}" 2>/dev/null | grep -q LISTEN; then
+    echo "  OK    x11vnc listening on ${VNC_PORT}"
+else
+    echo "  FAIL  x11vnc is NOT listening on ${VNC_PORT} — it has not attached to a display."
+    echo "        Usually means no Xorg session yet (reboot pending?) or a Wayland session."
+    echo "        Check: journalctl -u x11vnc -n 30"
+    HEALTH_FAILED=1
+fi
+
+# Must be bound to loopback ONLY. A 0.0.0.0 bind here exposes the desktop to
+# the whole plant network with no authentication.
+NOVNC_BIND=$(ss -ltn "sport = :${NOVNC_PORT}" 2>/dev/null | awk 'NR>1 {print $4}' | head -1)
+if [[ -z "$NOVNC_BIND" ]]; then
+    echo "  FAIL  websockify is NOT listening on ${NOVNC_PORT}"
+    HEALTH_FAILED=1
+elif [[ "$NOVNC_BIND" == 127.0.0.1:* || "$NOVNC_BIND" == "[::1]:"* ]]; then
+    echo "  OK    websockify bound to loopback only ($NOVNC_BIND)"
+else
+    echo "  FAIL  websockify is bound to $NOVNC_BIND — EXPOSED TO THE NETWORK."
+    echo "        The desktop is reachable without authentication. Do not deploy."
+    HEALTH_FAILED=1
+fi
 
 echo ""
 echo "=============================="
+if [[ "$HEALTH_FAILED" -ne 0 ]]; then
+    echo "VS setup FINISHED WITH FAILURES: ${VS_NAME}"
+    echo "Review the FAIL lines above before putting this machine into service."
+    echo "=============================="
+    exit 1
+fi
 echo "VS setup complete: ${VS_NAME}"
 echo "SSH:     Teleport → Servers → ${VS_NAME}"
 echo "Desktop: Teleport → Applications → ${VS_NAME}"
 echo ""
-echo "v4 EXPERIMENT: the screen share now follows a user switch, but only after"
-echo "  the new session has settled — logged in or unlocked, X answering, stable"
-echo "  for ~6s. Expect roughly 10-25s of black screen across a switch, then it"
-echo "  reattaches on its own. Reload the Teleport app tab if it stays blank."
+echo "IDENTITY: this VS is '${VS_NAME}' — the first linux user (UID 1000)."
+echo "  Stable by design: re-running this installer from any account, including"
+echo "  a 'customer' desktop session, produces the same name. SSH access is"
+echo "  granted for '${VS_NAME}' only."
 echo ""
-echo "  WHAT TO TEST: switch away, then switch BACK to the first user. Switching"
-echo "  away already worked in v2 — switching back is what broke GDM."
+echo "USER SWITCHING: the screen share follows a fast user switch on its own,"
+echo "  independently of the identity above. Expect ~10-25s of black screen"
+echo "  while the new session settles, then it reattaches. No logout needed."
+echo "  Reload the Teleport app tab if it stays blank — the browser client does"
+echo "  not always reconnect by itself after x11vnc restarts."
 echo ""
-echo "  Before you switch back, open an SSH session and leave this running:"
-echo "    journalctl -u x11vnc -u x11vnc-watcher -f"
+echo "  The delay is the safety mechanism, not slack. Reattaching during the"
+echo "  switch is what broke GDM in earlier versions. SETTLE_POLLS lives in"
+echo "  /usr/local/bin/x11vnc-watch.sh — do not shorten it casually."
 echo ""
-echo "  If it BREAKS, run these from SSH before rebooting:"
-echo "    xset q on the broken session is the direct residue check —"
-echo "    'auto repeat: off' means x11vnc left state behind when it was killed."
-echo "      sudo -u <user> DISPLAY=:<N> XAUTHORITY=/run/user/<uid>/gdm/Xauthority \\"
-echo "          xset q | grep -i -A1 'auto repeat'"
-echo "      journalctl _COMM=gnome-shell --since '5 min ago' -o short-precise | tail -40"
-echo "      coredumpctl list --since '5 min ago'"
-echo ""
-echo "  A failure does NOT immediately mean residue. Retry once with a longer"
-echo "  settle before concluding — edit SETTLE_POLLS=10 in"
-echo "  /usr/local/bin/x11vnc-watch.sh, then: systemctl restart x11vnc-watcher"
-echo "  (no reinstall needed). If it still breaks at ~20s, it is residue, and"
-echo "  the fix is one x11vnc per user session rather than one shared one."
+echo "  Watch it live:  journalctl -u x11vnc -u x11vnc-watcher -f"
+echo "  Roll back to the no-auto-switch build:  sudo bash setup-v3.sh"
 echo ""
 echo "  Roll back any time with: sudo bash setup-v3.sh"
 
