@@ -38,6 +38,27 @@ type IDP struct {
 	log    *slog.Logger
 	signer *KubernetesSigner
 	server *httptest.Server
+
+	// authorizationEndpoint and tokenEndpoint, when non-empty, are advertised
+	// in the discovery document. The fake IDP does not implement either
+	// endpoint itself; a test that needs them points these at its own handlers.
+	// They are omitted from the document when empty, so existing callers are
+	// unaffected.
+	authorizationEndpoint string
+	tokenEndpoint         string
+}
+
+// SetEndpoints sets the authorization and token endpoints advertised by the
+// discovery document. Either may be empty, in which case it is omitted.
+func (f *IDP) SetEndpoints(authorizationEndpoint, tokenEndpoint string) {
+	f.authorizationEndpoint = authorizationEndpoint
+	f.tokenEndpoint = tokenEndpoint
+}
+
+// SignClaims signs an arbitrary claims value with the IDP's key, so that tests
+// can mint tokens whose claim set is not the Kubernetes service account shape.
+func (f *IDP) SignClaims(claims any) (string, error) {
+	return f.signer.signWithClaims(claims)
 }
 
 // NewIDP creates a IDP and starts its HTTP server.
@@ -96,6 +117,12 @@ func (f *IDP) handleOpenIDConfig(w http.ResponseWriter, r *http.Request) {
 		"response_types_supported":              []string{"id_token"},
 		"scopes_supported":                      []string{"openid"},
 		"subject_types_supported":               []string{"public"},
+	}
+	if f.authorizationEndpoint != "" {
+		response["authorization_endpoint"] = f.authorizationEndpoint
+	}
+	if f.tokenEndpoint != "" {
+		response["token_endpoint"] = f.tokenEndpoint
 	}
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
