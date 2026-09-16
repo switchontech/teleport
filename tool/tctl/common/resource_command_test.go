@@ -54,6 +54,7 @@ import (
 	"github.com/gravitational/teleport/entitlements"
 	"github.com/gravitational/teleport/integration/helpers"
 	"github.com/gravitational/teleport/lib/auth/authclient"
+	"github.com/gravitational/teleport/lib/auth/authtest"
 	"github.com/gravitational/teleport/lib/config"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/fixtures"
@@ -2825,6 +2826,11 @@ func TestCreateEnterpriseResources(t *testing.T) {
 		require.NoError(t, process.Close())
 		require.NoError(t, process.Wait())
 	})
+	// The OIDC connector CRUD RPCs are additionally gated on an OIDC service
+	// being registered on the auth server (independent of the entitlement
+	// above); register a stub so the gate doesn't block this test from
+	// exercising `tctl create` for an OIDC connector.
+	process.GetAuthServer().SetOIDCService(authtest.StubOIDCService{})
 	clt, err := testenv.NewDefaultAuthClient(process)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = clt.Close() })
