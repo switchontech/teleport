@@ -530,6 +530,98 @@ func TestGitHubConnectorNameTooLarge(t *testing.T) {
 	require.ErrorContains(t, err, "exceeds maximum length")
 }
 
+// TestOIDCGatedOnRegisteredService verifies that ServerWithRoles.CreateOIDCConnector,
+// UpsertOIDCConnector, UpdateOIDCConnector and CreateOIDCAuthRequest are gated on
+// whether an OIDC service is registered on the auth server (auth.Server.SetOIDCService),
+// not on the (Enterprise-only) OIDC entitlement. Slice 0 of the Google-OIDC plan replaced
+// the old `modules.GetModules().Features().GetEntitlement(entitlements.OIDC).Enabled` check
+// with `a.authServer.oidcAuthService == nil`, since these code paths must work in OSS once
+// an OIDC service implementation is registered (Slice 4), independent of licensing.
+func TestOIDCGatedOnRegisteredService(t *testing.T) {
+	t.Parallel()
+
+	srv, err := authtest.NewAuthServer(authtest.AuthServerConfig{Dir: t.TempDir()})
+	require.NoError(t, err)
+
+	authContext, err := srv.Authorizer.Authorize(authz.ContextWithUser(t.Context(), authtest.TestBuiltin(types.RoleAdmin).I))
+	require.NoError(t, err)
+
+	authWithRoles := auth.NewServerWithRoles(
+		srv.AuthServer,
+		new(eventstest.MockAuditLog),
+		*authContext,
+	)
+
+	newConnector := func(name string) types.OIDCConnector {
+		conn, err := types.NewOIDCConnector(name, types.OIDCConnectorSpecV3{
+			ClientID:     "example-client-id",
+			ClientSecret: "example-client-secret",
+			RedirectURLs: []string{"https://proxy.example.com/v1/webapi/oidc/callback"},
+			Display:      "OIDC",
+			ClaimsToRoles: []types.ClaimMapping{
+				{
+					Claim: "test",
+					Value: "test",
+					Roles: []string{"access"},
+				},
+			},
+		})
+		require.NoError(t, err)
+		return conn
+	}
+
+	authRequest := types.OIDCAuthRequest{ConnectorID: "does-not-exist", Type: constants.OIDC}
+
+	// No OIDC service registered: all four gated methods must return AccessDenied,
+	// regardless of the OIDC entitlement (which is disabled by default in tests).
+	t.Run("no service registered", func(t *testing.T) {
+		_, err := authWithRoles.CreateOIDCConnector(t.Context(), newConnector("no-service-create"))
+		require.Error(t, err)
+		require.True(t, trace.IsAccessDenied(err), "expected access denied, got: %v", err)
+
+		_, err = authWithRoles.UpsertOIDCConnector(t.Context(), newConnector("no-service-upsert"))
+		require.Error(t, err)
+		require.True(t, trace.IsAccessDenied(err), "expected access denied, got: %v", err)
+
+		existing := newConnector("no-service-update")
+		_, err = authWithRoles.UpdateOIDCConnector(t.Context(), existing)
+		require.Error(t, err)
+		require.True(t, trace.IsAccessDenied(err), "expected access denied, got: %v", err)
+
+		_, err = authWithRoles.CreateOIDCAuthRequest(t.Context(), authRequest)
+		require.Error(t, err)
+		require.True(t, trace.IsAccessDenied(err), "expected access denied, got: %v", err)
+	})
+
+	// Register a stub OIDC service: the gate must now pass through to the
+	// underlying implementation for all four methods.
+	srv.AuthServer.SetOIDCService(authtest.StubOIDCService{})
+
+	t.Run("service registered", func(t *testing.T) {
+		created, err := authWithRoles.CreateOIDCConnector(t.Context(), newConnector("service-create"))
+		require.NoError(t, err)
+		require.NotNil(t, created)
+
+		upserted, err := authWithRoles.UpsertOIDCConnector(t.Context(), newConnector("service-upsert"))
+		require.NoError(t, err)
+		require.NotNil(t, upserted)
+
+		// UpdateOIDCConnector requires the revision of the resource being
+		// updated to match, so update the connector CreateOIDCConnector just
+		// persisted rather than a freshly constructed one.
+		_, err = authWithRoles.UpdateOIDCConnector(t.Context(), created)
+		require.NoError(t, err)
+
+		// CreateOIDCAuthRequest passes the gate and reaches the stub service,
+		// which unconditionally returns NotImplemented. Getting NotImplemented
+		// (rather than AccessDenied) proves the gate itself let the call through.
+		_, err = authWithRoles.CreateOIDCAuthRequest(t.Context(), authRequest)
+		require.Error(t, err)
+		require.False(t, trace.IsAccessDenied(err), "gate should have passed through, got: %v", err)
+		require.True(t, trace.IsNotImplemented(err), "expected the stub service's NotImplemented error, got: %v", err)
+	})
+}
+
 func TestGithubAuthRequest(t *testing.T) {
 	modulestest.SetTestModules(t, *modulestest.EnterpriseModules())
 	ctx := context.Background()

@@ -43,6 +43,7 @@ import (
 	"github.com/gravitational/teleport/entitlements"
 	"github.com/gravitational/teleport/lib/auth"
 	"github.com/gravitational/teleport/lib/auth/authclient"
+	"github.com/gravitational/teleport/lib/auth/authtest"
 	"github.com/gravitational/teleport/lib/auth/mocku2f"
 	"github.com/gravitational/teleport/lib/auth/storage"
 	wancli "github.com/gravitational/teleport/lib/auth/webauthncli"
@@ -1094,6 +1095,11 @@ func newAdminActionTestSuite(t *testing.T) *adminActionTestSuite {
 	authAddr, err := process.AuthAddr()
 	require.NoError(t, err)
 	s.authServer = process.GetAuthServer()
+	// The OIDC connector CRUD RPCs are additionally gated on an OIDC service
+	// being registered on the auth server (independent of the entitlement
+	// set above); register a stub so the gate doesn't block this suite's
+	// OIDC connector admin-action tests.
+	s.authServer.SetOIDCService(authtest.StubOIDCService{})
 
 	// create admin role and user.
 	username := "admin"
