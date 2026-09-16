@@ -1785,3 +1785,70 @@ func TestIdentityService_SSOMFASessionDataCRUD(t *testing.T) {
 	_, err = identity.GetMFASessionData(ctx, sd.RequestID)
 	require.True(t, trace.IsNotFound(err))
 }
+
+func TestIdentityService_OIDCAuthRequestCRUD(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clock := clockwork.NewFakeClock()
+	identity := newIdentityService(t, clock)
+
+	req := types.OIDCAuthRequest{
+		ConnectorID: "google",
+		StateToken:  "test-state-token",
+		CSRFToken:   "test-csrf-token",
+	}
+
+	// Verify create.
+	err := identity.CreateOIDCAuthRequest(ctx, req, time.Minute)
+	require.NoError(t, err)
+
+	// Verify read.
+	got, err := identity.GetOIDCAuthRequest(ctx, req.StateToken)
+	require.NoError(t, err)
+	require.Equal(t, req.ConnectorID, got.ConnectorID)
+	require.Equal(t, req.StateToken, got.StateToken)
+
+	// Verify delete.
+	err = identity.DeleteOIDCAuthRequest(ctx, req.StateToken)
+	require.NoError(t, err)
+
+	// Verify get-after-delete returns NotFound.
+	_, err = identity.GetOIDCAuthRequest(ctx, req.StateToken)
+	require.True(t, trace.IsNotFound(err))
+
+	// Deleting again should also return NotFound.
+	err = identity.DeleteOIDCAuthRequest(ctx, req.StateToken)
+	require.True(t, trace.IsNotFound(err))
+
+	// Deleting or getting with an empty state token should be a BadParameter.
+	err = identity.DeleteOIDCAuthRequest(ctx, "")
+	require.True(t, trace.IsBadParameter(err))
+}
+
+func TestIdentityService_OIDCAuthRequestTTLExpiry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clock := clockwork.NewFakeClock()
+	identity := newIdentityService(t, clock)
+
+	req := types.OIDCAuthRequest{
+		ConnectorID: "google",
+		StateToken:  "expiring-state-token",
+		CSRFToken:   "test-csrf-token",
+	}
+
+	ttl := time.Minute
+	err := identity.CreateOIDCAuthRequest(ctx, req, ttl)
+	require.NoError(t, err)
+
+	// Still readable before TTL elapses.
+	_, err = identity.GetOIDCAuthRequest(ctx, req.StateToken)
+	require.NoError(t, err)
+
+	// Advance the clock past the TTL; the request should expire on its own,
+	// independent of any explicit delete.
+	clock.Advance(ttl + time.Second)
+
+	_, err = identity.GetOIDCAuthRequest(ctx, req.StateToken)
+	require.True(t, trace.IsNotFound(err))
+}
