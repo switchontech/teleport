@@ -226,6 +226,9 @@ type Identity interface {
 	// GetOIDCAuthRequest returns OIDC auth request if found
 	GetOIDCAuthRequest(ctx context.Context, stateToken string) (*types.OIDCAuthRequest, error)
 
+	// DeleteOIDCAuthRequest deletes OIDC auth request
+	DeleteOIDCAuthRequest(ctx context.Context, stateToken string) error
+
 	// CreateSAMLConnector creates a new SAML connector.
 	CreateSAMLConnector(ctx context.Context, connector types.SAMLConnector) (types.SAMLConnector, error)
 	// UpdateSAMLConnector updates an existing SAML connector

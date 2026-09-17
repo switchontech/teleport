@@ -1715,6 +1715,14 @@ func (s *IdentityService) GetOIDCAuthRequest(ctx context.Context, stateToken str
 	return req, nil
 }
 
+// DeleteOIDCAuthRequest deletes OIDC auth request
+func (s *IdentityService) DeleteOIDCAuthRequest(ctx context.Context, stateToken string) error {
+	if stateToken == "" {
+		return trace.BadParameter("missing parameter stateToken")
+	}
+	return trace.Wrap(s.Delete(ctx, backend.NewKey(webPrefix, connectorsPrefix, oidcPrefix, requestsPrefix, stateToken)))
+}
+
 // UpsertSAMLConnector upserts SAML Connector
 func (s *IdentityService) UpsertSAMLConnector(ctx context.Context, connector types.SAMLConnector) (types.SAMLConnector, error) {
 	if err := services.ValidateSAMLConnector(connector, nil); err != nil {
