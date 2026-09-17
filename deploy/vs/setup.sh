@@ -17,10 +17,6 @@ set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "ERROR: must run as root. Use: sudo bash setup.sh"; exit 1; }
 
-PROXY="172.30.196.160.nip.io:3080"
-TOKEN="vs-join-token-switchon"
-CA_PIN="sha256:d34246f0cde514c311315c5c3e234ef96d3592d9b9c499fc60c45010242dc7cf"
-
 TELEPORT_VERSION="18.10.0"
 VNC_PORT="5900"
 NOVNC_PORT="6080"
@@ -187,7 +183,17 @@ else
 fi
 
 echo "=== [1/6] Installing Teleport $TELEPORT_VERSION ==="
-curl -fsSL https://goteleport.com/static/install.sh | bash -s "$TELEPORT_VERSION"
+INSTALLED_TP=$(teleport version 2>/dev/null | awk '/Teleport/{print $2}' | head -1) || true
+if [[ "$INSTALLED_TP" == "v${TELEPORT_VERSION}" ]]; then
+    echo "Teleport $TELEPORT_VERSION already installed, skipping."
+elif [[ -f /etc/apt/sources.list.d/teleport.list ]]; then
+    # Repo already set up from a prior run — install/downgrade directly so we
+    # can pass --allow-downgrades (the external install.sh doesn't).
+    apt-get update -qq
+    apt-get install -y --allow-downgrades teleport="${TELEPORT_VERSION}"
+else
+    curl -fsSL https://goteleport.com/static/install.sh | bash -s "$TELEPORT_VERSION"
+fi
 
 echo "=== [2/6] Installing x11vnc + noVNC + websockify ==="
 # `|| true`: a single unreachable third-party repo would otherwise abort the
@@ -267,7 +273,7 @@ app_service:
   enabled: true
   apps:
     - name: "${VS_NAME}"
-      uri: "http://localhost:${NOVNC_PORT}/vnc_auto.html?resize=scale"
+      uri: "http://localhost:${NOVNC_PORT}/vnc.html?autoconnect=true&resize=scale"
       public_addr: "${VS_NAME}.${PROXY_HOST}"
       labels:
         vs-id: "${VS_NAME}"
@@ -361,7 +367,12 @@ active_session() {
         user=$(loginctl show-session "$session" -p Name --value 2>/dev/null || true)
         uid=$(id -u "$user" 2>/dev/null || echo -1)
         [[ "$uid" -ge 1000 ]] || continue     # rejects gdm's greeter session
-        displays=$(who | awk -v u="$user" '$1==u && $2 ~ /^:[0-9]+$/ {printf "%s ", $2}')
+        displays=$(who | awk -v u="$user" '
+            $1==u {
+                if ($2~/^:[0-9]+$/) printf "%s ", $2
+                else if ($2~/^tty[0-9]+$/ && $NF~/^\(:[0-9]+\)$/) printf "%s ", substr($NF,2,length($NF)-2)
+            }
+        ')
         [[ -n "$displays" ]] || continue
         echo "$user $displays"
         return 0
@@ -559,7 +570,12 @@ settled_display() {
         [[ "$locked" == "no" ]] || continue
         home=$(getent passwd "$user" | cut -d: -f6)
         xauth=$(find_xauth "$uid" "$home") || continue
-        displays=$(who | awk -v u="$user" '$1==u && $2 ~ /^:[0-9]+$/ {printf "%s ", $2}')
+        displays=$(who | awk -v u="$user" '
+            $1==u {
+                if ($2~/^:[0-9]+$/) printf "%s ", $2
+                else if ($2~/^tty[0-9]+$/ && $NF~/^\(:[0-9]+\)$/) printf "%s ", substr($NF,2,length($NF)-2)
+            }
+        ')
         for d in $displays; do
             if XAUTHORITY="$xauth" DISPLAY="$d" xdpyinfo >/dev/null 2>&1; then
                 echo "$d"
