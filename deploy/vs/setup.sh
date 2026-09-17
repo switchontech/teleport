@@ -17,6 +17,8 @@ set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "ERROR: must run as root. Use: sudo bash setup.sh"; exit 1; }
 
+#Deployed teleport's creds
+
 TELEPORT_VERSION="18.10.0"
 VNC_PORT="5900"
 NOVNC_PORT="6080"
@@ -239,6 +241,114 @@ if x11vnc "${X11VNC_FLAGS[@]}" -help 2>&1 | grep -qi "unrecognized option"; then
 fi
 echo "x11vnc flag set accepted by $(x11vnc -version 2>&1 | head -1)."
 
+# ── Seamless clipboard ───────────────────────────────────────
+# The pinned noVNC (1.0.0 / 1.3.0) ships only the MANUAL clipboard panel — you
+# must open the sidebar to move text. Automatic navigator.clipboard sync exists
+# only on noVNC's UNRELEASED master, so instead of vendoring a moving HEAD we
+# bridge it in the browser: a tiny glue script drives noVNC's OWN clipboard
+# textarea (#noVNC_clipboard_text). That element is the one noVNC already binds
+# to rfb.clipboardPasteFrom (its 'change' listener) and already fills from the
+# server ('clipboard' event -> clipboardReceive). So the glue touches the DOM
+# only, never noVNC's module-scoped internals — verified to exist identically on
+# both pinned builds — and drives real copy/paste in both directions.
+#
+# Served as a COPY of vnc.html (vnc_clip.html): stock vnc.html + its toolbar
+# stay intact as a fallback, apt-owned files are never edited, and regenerating
+# both files every run keeps this idempotent with the rest of the installer.
+#
+# LIMITS (repeated in the closing notes): reading the local clipboard uses
+# navigator.clipboard.readText(), which is Chrome/Edge only (Firefox never
+# exposes it to web content), needs the https origin (Teleport provides it),
+# and needs a one-time clipboard-read grant that the operator's first click
+# supplies. Always-on local->remote means the focused tab pushes the operator's
+# local clipboard to the plant VS — same as AnyDesk, deliberate.
+NOVNC_DIR=/usr/share/novnc
+NOVNC_CLIENT="vnc.html"
+if [[ -f "$NOVNC_DIR/vnc.html" ]]; then
+    cat > "$NOVNC_DIR/clipboard-glue.js" <<'GLUE'
+(function () {
+  "use strict";
+  var TEXT_ID = "noVNC_clipboard_text";
+  var last = null;      // last text synced either way — shared dedupe, kills the echo loop
+  var granted = false;
+
+  function box() { return document.getElementById(TEXT_ID); }
+
+  function connected() {
+    return document.documentElement.classList.contains("noVNC_connected");
+  }
+
+  // remote -> local: noVNC drops the server clipboard into the textarea; mirror to the OS.
+  function pullRemote() {
+    var t = box();
+    if (!t) return;
+    var v = t.value;
+    if (v && v !== last) {
+      last = v;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(v).catch(function (e) {
+          console.warn("[clip] writeText failed:", e && e.name);
+        });
+      }
+    }
+  }
+
+  // local -> remote: read the OS clipboard, load the textarea, fire 'change' so noVNC sends it.
+  function pushLocal() {
+    if (!navigator.clipboard || !navigator.clipboard.readText) return;
+    navigator.clipboard.readText().then(function (v) {
+      granted = true;
+      if (!connected()) return;   // RFB not up yet — dispatching 'change' would crash noVNC
+      if (v && v !== last) {
+        last = v;
+        var t = box();
+        if (t) { t.value = v; t.dispatchEvent(new Event("change")); }
+      }
+    }).catch(function (e) {
+      // NotAllowedError is expected until the grant lands — surface it, don't hide it.
+      console.warn("[clip] readText failed:", e && e.name);
+    });
+  }
+
+  // A timer has no user activation, so readText() cannot raise the permission
+  // prompt on its own. The operator's first click/keydown (they click into the
+  // canvas anyway) carries activation and raises it; after that the eager push
+  // and poll work on their own.
+  function bootstrap() {
+    pushLocal();
+    if (granted) {
+      document.removeEventListener("click", bootstrap, true);
+      document.removeEventListener("keydown", bootstrap, true);
+    }
+  }
+  document.addEventListener("click", bootstrap, true);
+  document.addEventListener("keydown", bootstrap, true);
+
+  // Eager push on focus so the remote clipboard is already correct before the
+  // operator presses Ctrl+V there (readText is async — inline Ctrl+V would race).
+  window.addEventListener("focus", pushLocal);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) pushLocal();
+  });
+
+  setInterval(pullRemote, 500);                                       // remote -> local
+  setInterval(function () { if (document.hasFocus()) pushLocal(); }, 1500); // local -> remote safety net
+
+  console.log("[clip] auto-clipboard bridge active");
+})();
+GLUE
+    # vnc_clip.html = vnc.html with our glue <script> injected before </body>.
+    # sed, so it tracks whatever vnc.html the installed noVNC shipped.
+    sed 's#</body>#    <script src="clipboard-glue.js"></script>\n</body>#' \
+        "$NOVNC_DIR/vnc.html" > "$NOVNC_DIR/vnc_clip.html"
+    chmod 644 "$NOVNC_DIR/clipboard-glue.js" "$NOVNC_DIR/vnc_clip.html"
+    NOVNC_CLIENT="vnc_clip.html"
+    echo "Auto-clipboard bridge installed -> $NOVNC_DIR/vnc_clip.html"
+else
+    echo "WARNING: $NOVNC_DIR/vnc.html not found — auto-clipboard bridge skipped."
+    echo "         Teleport app will serve stock vnc.html (manual clipboard panel)."
+fi
+
 echo "=== [3/6] Checking BPF enhanced session recording support ==="
 ENHANCED_RECORDING_ENABLED="true"
 if [[ ! -e /sys/kernel/btf/vmlinux ]]; then
@@ -273,7 +383,7 @@ app_service:
   enabled: true
   apps:
     - name: "${VS_NAME}"
-      uri: "http://localhost:${NOVNC_PORT}/vnc.html?autoconnect=true&resize=scale"
+      uri: "http://localhost:${NOVNC_PORT}/${NOVNC_CLIENT}?autoconnect=true&resize=scale"
       public_addr: "${VS_NAME}.${PROXY_HOST}"
       labels:
         vs-id: "${VS_NAME}"
@@ -776,10 +886,10 @@ echo "  The delay is the safety mechanism, not slack. Reattaching during the"
 echo "  switch is what broke GDM in earlier versions. SETTLE_POLLS lives in"
 echo "  /usr/local/bin/x11vnc-watch.sh — do not shorten it casually."
 echo ""
-echo "  Watch it live:  journalctl -u x11vnc -u x11vnc-watcher -f"
-echo "  Roll back to the no-auto-switch build:  sudo bash setup-v3.sh"
+echo "CLIPBOARD (AnyDesk-style copy/paste): served via ${NOVNC_CLIENT}."
+echo "  - Use Chrome or Edge. Firefox cannot read the local clipboard from a"
+echo "    web page, so local->remote paste will not work there."
 echo ""
-echo "  Roll back any time with: sudo bash setup-v3.sh"
 
 # The Wayland fix above only lands at the next GDM start. If the session
 # running RIGHT NOW is Wayland, x11vnc cannot attach to it and is currently
