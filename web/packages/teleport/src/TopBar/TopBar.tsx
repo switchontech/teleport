@@ -16,14 +16,16 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, { type JSX } from 'react';
+import React from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
-import styled, { css } from 'styled-components';
+import styled, { css, useTheme } from 'styled-components';
 
-import { Box, breakpointsPx, Flex, TopNav } from 'design';
+import { Box, breakpointsPx, Flex, Image, Text, TopNav } from 'design';
+import * as Icon from 'design/Icon';
 import { HoverTooltip } from 'design/Tooltip';
+import { useStore } from 'shared/libs/stores';
 
-import { SwitchOnLogo } from 'teleport/components/SwitchOnLogo';
+import { logoSrc } from 'teleport/components/LogoHero/LogoHero';
 import { UserMenuNav } from 'teleport/components/UserMenuNav';
 import cfg from 'teleport/config';
 import { FeatureScopes } from 'teleport/features';
@@ -31,6 +33,7 @@ import { useFeatures } from 'teleport/FeaturesContext';
 import { useLayout } from 'teleport/Main/LayoutContext';
 import { zIndexMap } from 'teleport/Navigation/zIndexMap';
 import { Notifications } from 'teleport/Notifications';
+import useTeleport from 'teleport/useTeleport';
 
 export function TopBar({
   CustomLogo,
@@ -42,6 +45,9 @@ export function TopBar({
   const location = useLocation();
   const features = useFeatures();
   const { currentWidth } = useLayout();
+  const ctx = useTeleport();
+  const storeUser = useStore(ctx.storeUser);
+  const scope = storeUser.getScope();
 
   // find active feature
   const feature = features.find(
@@ -60,10 +66,24 @@ export function TopBar({
 
   return (
     <TopBarContainer>
-      <TeleportLogo CustomLogo={CustomLogo} withLink={!scopePickerMode} />
+      <Flex alignItems="center">
+        <TeleportLogo CustomLogo={CustomLogo} withLink={!scopePickerMode} />
+        {scope && !feature?.logoOnlyTopbar && (
+          <HoverTooltip tipContent="Current scope">
+            <Flex alignItems="center" gap={1}>
+              <Icon.Contract aria-label="scope" />
+              <Text typography="body1">{scope}</Text>
+            </Flex>
+          </HoverTooltip>
+        )}
+      </Flex>
       {!feature?.logoOnlyTopbar && (
         <Flex height="100%" alignItems="center">
-          <Notifications iconSize={iconSize} />
+          {
+            // TODO(bl-nero): enable notifications once they're supported by
+            // scopes.
+            !scope && <Notifications iconSize={iconSize} />
+          }
           <UserMenuNav hideFeatures={feature instanceof FeatureScopes} />
         </Flex>
       )}
@@ -71,7 +91,7 @@ export function TopBar({
   );
 }
 
-export const TopBarContainer = styled(TopNav)`
+const TopBarContainer = styled(TopNav)`
   position: fixed;
   width: 100%;
   display: flex;
@@ -96,19 +116,33 @@ const TeleportLogo = ({
   CustomLogo?: () => React.ReactElement;
   withLink: boolean;
 }) => {
+  const theme = useTheme();
+  const src = logoSrc(theme.type);
   const logoContent = CustomLogo ? (
     <CustomLogo />
   ) : (
-    <span
+    <Image
       data-testid="teleport-logo"
-      style={{ paddingLeft: 16, paddingRight: 16, display: 'flex', alignItems: 'center' }}
-    >
-      <SwitchOnLogo height={36} />
-    </span>
+      src={src}
+      alt="Teleport logo"
+      css={`
+        padding-left: ${props => props.theme.space[3]}px;
+        padding-right: ${props => props.theme.space[3]}px;
+        height: 18px;
+        @media screen and (min-width: ${p => p.theme.breakpoints.small}) {
+          height: 28px;
+          padding-left: ${props => props.theme.space[4]}px;
+          padding-right: ${props => props.theme.space[4]}px;
+        }
+        @media screen and (min-width: ${p => p.theme.breakpoints.large}) {
+          height: 30px;
+        }
+      `}
+    />
   );
 
   return withLink ? (
-    <HoverTooltip placement="bottom" tipContent="DeepInspect Pro">
+    <HoverTooltip placement="bottom" tipContent="Teleport Resources Home">
       <LinkLogoWrapper to={cfg.routes.root}>{logoContent}</LinkLogoWrapper>
     </HoverTooltip>
   ) : (
@@ -121,12 +155,6 @@ const commonLogoWrapperStyles = css`
   align-items: center;
   height: 100%;
   margin-right: 0px;
-  @media screen and (min-width: ${p => p.theme.breakpoints.medium}) {
-    margin-right: 76px;
-  }
-  @media screen and (min-width: ${p => p.theme.breakpoints.large}) {
-    margin-right: 67px;
-  }
 `;
 
 const BoxLogoWrapper = styled(Box)`
@@ -143,11 +171,5 @@ const LinkLogoWrapper = styled(Link)`
   }
 `;
 
-export const navigationIconSizeSmall = 20;
-export const navigationIconSizeMedium = 24;
-
-export type NavigationItem = {
-  title: string;
-  path: string;
-  Icon: JSX.Element;
-};
+const navigationIconSizeSmall = 20;
+const navigationIconSizeMedium = 24;

@@ -116,11 +116,12 @@ const auth = {
       .then(parseMfaChallengeJson);
   },
 
-  login(userId: string, password: string, otpCode: string) {
+  login(userId: string, password: string, otpCode: string, scope: string) {
     const data = {
       user: userId,
       pass: password,
       second_factor_token: otpCode,
+      scope,
     };
 
     return api.postWithOptions(cfg.api.webSessionPath, {
@@ -132,7 +133,7 @@ const auth = {
     });
   },
 
-  loginWithWebauthn(creds?: UserCredentials) {
+  loginWithWebauthn(creds?: UserCredentials, scope: string = '') {
     return auth
       .checkWebauthnSupport()
       .then(() => auth.mfaLoginBegin(creds))
@@ -145,6 +146,7 @@ const auth = {
         const request = {
           user: creds?.username,
           webauthnAssertionResponse: makeWebauthnAssertionResponse(res),
+          scope,
         };
 
         return api.postWithOptions(cfg.api.mfaLoginFinish, {
@@ -248,8 +250,6 @@ const auth = {
       const request = {
         action: 'accept',
         mfaResponse: res,
-        // TODO(Joerger): DELETE IN v19.0.0, new clients send mfaResponse.
-        webauthnAssertionResponse: res.webauthn_response,
       };
 
       return api.put(cfg.getHeadlessSsoPath(transactionId), request);
@@ -357,10 +357,6 @@ const auth = {
   createPrivilegeToken(existingMfaResponse?: MfaChallengeResponse) {
     return api.post(cfg.api.createPrivilegeTokenPath, {
       existingMfaResponse,
-      // TODO(Joerger): DELETE IN v19.0.0
-      // Also provide totp/webauthn response in backwards compatible format.
-      secondFactorToken: existingMfaResponse?.totp_code,
-      webauthnAssertionResponse: existingMfaResponse?.webauthn_response,
     });
   },
 
@@ -486,11 +482,11 @@ export type IsMfaRequiredRequest =
   | IsMfaRequiredApp
   | IsMfaRequiredAdminAction;
 
-export type IsMfaRequiredResponse = {
+type IsMfaRequiredResponse = {
   required: boolean;
 };
 
-export type IsMfaRequiredDatabase = {
+type IsMfaRequiredDatabase = {
   database: {
     // service_name is the database service name.
     service_name: string;
@@ -503,7 +499,7 @@ export type IsMfaRequiredDatabase = {
   };
 };
 
-export type IsMfaRequiredNode = {
+type IsMfaRequiredNode = {
   node: {
     // node_name can be node's hostname or UUID.
     node_name: string;
@@ -512,7 +508,7 @@ export type IsMfaRequiredNode = {
   };
 };
 
-export type IsMfaRequiredWindowsDesktop = {
+type IsMfaRequiredWindowsDesktop = {
   windows_desktop: {
     // desktop_name is the Windows Desktop server name.
     desktop_name: string;
@@ -521,14 +517,14 @@ export type IsMfaRequiredWindowsDesktop = {
   };
 };
 
-export type IsMfaRequiredKube = {
+type IsMfaRequiredKube = {
   kube: {
     // cluster_name is the name of the kube cluster.
     cluster_name: string;
   };
 };
 
-export type IsMfaRequiredApp = {
+type IsMfaRequiredApp = {
   app: {
     // fqdn indicates (tentatively) the fully qualified domain name of the application.
     fqdn: string;
@@ -539,7 +535,7 @@ export type IsMfaRequiredApp = {
   };
 };
 
-export type IsMfaRequiredAdminAction = {
+type IsMfaRequiredAdminAction = {
   // empty object.
   admin_action: Record<string, never>;
 };

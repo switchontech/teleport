@@ -2,7 +2,6 @@
   "name": "@gravitational/shared",
   "version": "1.0.0",
   "description": "Gravitational library of shared components",
-  "main": "index.js",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -10,7 +9,7 @@
     "directory": "packages/shared"
   },
   "scripts": {
-    "build-wasm": "node ../../scripts/clean-up-ironrdp-artifacts.mjs && make -C ../../../ build-ironrdp-wasm"
+    "build-wasm": "make -C ../../../ build-ironrdp-wasm"
   },
   "dependencies": {
     "@gravitational/design": "workspace:*",
@@ -21,6 +20,6 @@
     "semver": "^7.8.5"
   },
   "devDependencies": {
-    "@types/semver": "^7.7.1"
+    "@types/semver": "^7.8.0"
   }
 }

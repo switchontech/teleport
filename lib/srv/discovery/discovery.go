@@ -855,7 +855,54 @@ func (s *Server) azureServerFetchersFromMatchers(matchers []types.AzureMatcher, 
 		return matcherType == types.AzureMatcherVM
 	})
 
-	return server.MatchersToAzureInstanceFetchers(s.ctx, s.Log, serverMatchers, s.getAzureClients, discoveryConfigName, s.getAzureSubscriptionList)
+	var allFetchers []server.Fetcher[*server.AzureInstances]
+	for _, matcher := range serverMatchers {
+		fetchers, err := server.MatcherToAzureInstanceFetchers(
+			s.ctx,
+			s.Log,
+			matcher,
+			s.getAzureClients,
+			discoveryConfigName,
+			s.getAzureSubscriptionList,
+		)
+		if err != nil {
+			s.Log.WarnContext(s.ctx, "Failed to resolve Azure subscription wildcard in discovery configuration",
+				"integration", matcher.Integration,
+				"discovery_config", discoveryConfigName,
+				"error", err,
+			)
+			s.handleAzureSubscriptionListError(matcher.Integration, err)
+			continue
+		}
+		allFetchers = append(allFetchers, fetchers...)
+	}
+	return allFetchers
+}
+
+func (s *Server) handleAzureSubscriptionListError(integration string, err error) {
+	issueType := classifyAzureSubscriptionListError(err)
+	if integration == "" || issueType == "" {
+		return
+	}
+
+	var tenantID, clientID string
+	integrationResource, err := s.Config.AccessPoint.GetIntegration(s.ctx, integration)
+	if err != nil {
+		s.Log.WarnContext(s.ctx, "Failed to get Azure integration identity for User Task",
+			"integration", integration,
+			"error", err,
+		)
+	} else if azureOIDCSpec := integrationResource.GetAzureOIDCIntegrationSpec(); azureOIDCSpec != nil {
+		tenantID = azureOIDCSpec.TenantID
+		clientID = azureOIDCSpec.ClientID
+	}
+
+	if err := s.taskUpdater().upsertAzureSubscriptionListTask(integration, issueType, tenantID, clientID); err != nil {
+		s.Log.WarnContext(s.ctx, "Failed to upsert Azure subscription list permission User Task",
+			"integration", integration,
+			"error", err,
+		)
+	}
 }
 
 func (s *Server) getAzureSubscriptionListNoCache(ctx context.Context, integration string) ([]string, error) {
@@ -2426,6 +2473,28 @@ func discardAmbientCredentialMatchers(ctx context.Context, log *slog.Logger, m *
 	if len(m.Kubernetes) > 0 {
 		log.WarnContext(ctx, "Discarding Kubernetes matchers - missing integration")
 		m.Kubernetes = []types.KubernetesMatcher{}
+	}
+
+	if m.AccessGraph != nil {
+		var validAcessGraphAWSMatchers []*types.AccessGraphAWSSync
+		for i, m := range m.AccessGraph.AWS {
+			if m.Integration == "" {
+				log.WarnContext(ctx, "Discarding Access Graph AWS matcher - missing integration", "matcher_pos", i)
+				continue
+			}
+			validAcessGraphAWSMatchers = append(validAcessGraphAWSMatchers, m)
+		}
+		m.AccessGraph.AWS = validAcessGraphAWSMatchers
+
+		var validAccessGraphAzureMatchers []*types.AccessGraphAzureSync
+		for i, m := range m.AccessGraph.Azure {
+			if m.Integration == "" {
+				log.WarnContext(ctx, "Discarding Access Graph Azure matcher - missing integration", "matcher_pos", i)
+				continue
+			}
+			validAccessGraphAzureMatchers = append(validAccessGraphAzureMatchers, m)
+		}
+		m.AccessGraph.Azure = validAccessGraphAzureMatchers
 	}
 }
 

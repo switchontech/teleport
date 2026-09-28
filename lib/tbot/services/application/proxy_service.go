@@ -22,6 +22,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,6 +35,7 @@ import (
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/defaults"
+	"github.com/gravitational/teleport/lib/scopes"
 	"github.com/gravitational/teleport/lib/srv/alpnproxy/common"
 	"github.com/gravitational/teleport/lib/tbot/bot"
 	"github.com/gravitational/teleport/lib/tbot/bot/connection"
@@ -176,7 +178,7 @@ func (s *ProxyService) Run(ctx context.Context) error {
 	})
 	s.log.InfoContext(ctx, "Finished initializing")
 
-	var errCh = make(chan error, 1)
+	errCh := make(chan error, 1)
 	go func() {
 		s.log.DebugContext(ctx, "Starting proxy request handler goroutine")
 		errCh <- httpSrv.Serve(l)
@@ -246,8 +248,11 @@ func (s *ProxyService) issueCert(
 			)
 		}
 	}()
+
+	// ProxyService does not support scopes yet, so we give it an SQN without scope set
+	// to signal to the getRouteToApp internals that this is an unscoped request.
 	route, app, err := getRouteToApp(
-		ctx, s.getBotIdentity(), impersonatedClient, appName,
+		ctx, s.getBotIdentity(), impersonatedClient, scopes.QualifiedName{Name: appName},
 	)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
@@ -321,20 +326,19 @@ func (s *ProxyService) handleProxyRequest(w http.ResponseWriter, req *http.Reque
 	// TODO(noah): We could cache the httpClient itself for each upstream, this
 	// would potentially allow performance improvements by caching connections.
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			Certificates:       []tls.Certificate{*appCert},
-			InsecureSkipVerify: s.botClient.Config().InsecureSkipVerify,
-		},
-	}
-	// Inject the ALPN upgrade dialer if required.
-	if s.alpnUpgradeRequired {
-		transport.DialContext = apiclient.NewALPNDialer(apiclient.ALPNDialerConfig{
-			ALPNConnUpgradeRequired: true,
+		// The ALPN dialer's conn has already completed its TLS handshake, so
+		// it is wired in as DialTLSContext rather than DialContext.
+		DialTLSContext: apiclient.NewALPNDialer(apiclient.ALPNDialerConfig{
+			ALPNConnUpgradeRequired: s.alpnUpgradeRequired,
 			TLSConfig: &tls.Config{
+				Certificates:       []tls.Certificate{*appCert},
 				InsecureSkipVerify: s.botClient.Config().InsecureSkipVerify,
 				NextProtos:         []string{string(common.ProtocolHTTP)},
 			},
-		}).DialContext
+			GetClusterCAs: func(context.Context) (*x509.CertPool, error) {
+				return s.getBotIdentity().TLSCAPool, nil
+			},
+		}).DialContext,
 	}
 	httpClient := &http.Client{
 		Transport: transport,

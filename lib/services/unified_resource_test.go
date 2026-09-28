@@ -1208,12 +1208,16 @@ func TestUnifiedResourceWatcher_DeleteEvent(t *testing.T) {
 	err = clt.DeleteWindowsDesktop(ctx, desktops[0].Spec.HostID, desktops[0].GetName())
 	require.NoError(t, err)
 	desktops = desktops[1:]
-	err = clt.DeleteKubernetesServer(ctx, kubeServers[0].Spec.HostID, kubeServers[0].GetName())
+	err = clt.DeleteKubeServer(ctx, presencev1.DeleteKubeServerRequest_builder{
+		Scope:  kubeServers[0].GetScope(),
+		HostId: kubeServers[0].Spec.HostID,
+		Name:   kubeServers[0].GetName(),
+	}.Build())
 	require.NoError(t, err)
 	kubeServers = kubeServers[1:]
 
 	// delete everything else
-	err = clt.DeleteNode(ctx, "default", node.GetName())
+	err = clt.DeleteSSHServer(ctx, presencev1.DeleteSSHServerRequest_builder{Name: node.GetName(), Scope: node.GetScope()}.Build())
 	require.NoError(t, err)
 	err = clt.DeleteSAMLIdPServiceProvider(ctx, samlapp.GetName())
 	require.NoError(t, err)
@@ -1252,7 +1256,11 @@ func TestUnifiedResourceWatcher_DeleteEvent(t *testing.T) {
 		require.NoError(t, err)
 	}
 	for _, kubeServer := range kubeServers {
-		err = clt.DeleteKubernetesServer(ctx, kubeServer.Spec.HostID, kubeServer.GetName())
+		err = clt.DeleteKubeServer(ctx, presencev1.DeleteKubeServerRequest_builder{
+			Scope:  kubeServer.GetScope(),
+			HostId: kubeServer.GetHostID(),
+			Name:   kubeServer.GetName(),
+		}.Build())
 		require.NoError(t, err)
 	}
 

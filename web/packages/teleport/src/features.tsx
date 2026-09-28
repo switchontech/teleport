@@ -79,11 +79,21 @@ import { UnifiedResources } from './UnifiedResources';
 import { Users } from './Users';
 import { WorkloadIdentities } from './WorkloadIdentity/WorkloadIdentities';
 
-// to promote feature discoverability, most features should be visible in the navigation even if a user doesnt have access.
-// However, there are some cases where hiding the feature is explicitly requested. Use this as a backdoor to hide the features that
-// are usually "always visible"
-export function shouldHideFromNavigation(cfg: Cfg) {
+// shouldHideInaccessibleFeatures returns whether features the user lacks access to
+// should be hidden from the navigation entirely, rather than shown for
+// discoverability. This is the case for dashboard tenants, and when feature
+// hiding is enabled in the license.
+export function shouldHideInaccessibleFeatures(cfg: Cfg) {
   return cfg.isDashboard || cfg.hideInaccessibleFeatures;
+}
+
+// canShowFeature returns whether the user can see a given feature based on their RBAC permissions,
+// whether the feature is discoverable and whether featurehiding is enabled in the license.
+export function canShowFeature(feature: TeleportFeature, flags: FeatureFlags) {
+  if (feature.hasAccess(flags)) {
+    return true;
+  }
+  return !!feature.discoverable && !shouldHideInaccessibleFeatures(cfg);
 }
 
 class AccessRequests implements TeleportFeature {
@@ -96,10 +106,7 @@ class AccessRequests implements TeleportFeature {
     component: LockedAccessRequests,
   };
 
-  hasAccess(flags: FeatureFlags) {
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.accessRequests;
-    }
+  hasAccess() {
     return true;
   }
 
@@ -144,6 +151,7 @@ export class FeatureUnifiedResources implements TeleportFeature {
   sideNavCategory = SideNavigationCategory.Resources;
   // TODO(rudream): Remove this once shortcuts to pinned/nodes/apps/dbs/desktops/kubes are implemented.
   standalone = true;
+  supportsScopes = true;
 
   route = {
     title: 'Resources',
@@ -254,13 +262,10 @@ export class FeatureBots implements TeleportFeature {
     component: Bots,
   };
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags) {
-    // if feature hiding is enabled, only show
-    // if the user has access
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.listBots;
-    }
-    return true;
+    return flags.listBots;
   }
 
   navigationItem = {
@@ -288,13 +293,10 @@ export class FeatureBotInstances implements TeleportFeature {
     component: BotInstances,
   };
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags) {
-    // if feature hiding is enabled, only show
-    // if the user has access
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.listBotInstances;
-    }
-    return true;
+    return flags.listBotInstances;
   }
 
   navigationItem = {
@@ -330,13 +332,10 @@ export class FeatureInstances implements TeleportFeature {
     component: Instances,
   };
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags) {
-    // if feature hiding is enabled, only show
-    // if the user has access
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.listInstances || flags.listBotInstances;
-    }
-    return true;
+    return flags.listInstances || flags.listBotInstances;
   }
 
   navigationItem = {
@@ -587,13 +586,10 @@ export class FeatureDiscover implements TeleportFeature {
 export class FeatureIntegrations implements TeleportFeature {
   category = NavigationCategory.ZeroTrustAccess;
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags) {
-    // if feature hiding is enabled, only show
-    // if the user has access
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.integrations;
-    }
-    return true;
+    return flags.integrations;
   }
 
   route = {
@@ -628,11 +624,10 @@ export class FeatureIntegrationEnroll implements TeleportFeature {
     component: IntegrationEnroll,
   };
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags) {
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.enrollIntegrations;
-    }
-    return true;
+    return flags.enrollIntegrations;
   }
 
   navigationItem = {
@@ -661,16 +656,14 @@ export class FeatureManagedUpdates implements TeleportFeature {
     component: ManagedUpdates,
   };
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags) {
-    const canViewPage =
+    return (
       flags.readAutoUpdateConfig ||
       flags.readAutoUpdateVersion ||
-      flags.readAutoUpdateAgentRollout;
-
-    if (shouldHideFromNavigation(cfg)) {
-      return canViewPage;
-    }
-    return true;
+      flags.readAutoUpdateAgentRollout
+    );
   }
 
   navigationItem = {
@@ -805,13 +798,10 @@ export class FeatureWorkloadIdentity implements TeleportFeature {
     component: WorkloadIdentities,
   };
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags): boolean {
-    // if feature hiding is enabled, only show
-    // if the user has access
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.listWorkloadIdentities;
-    }
-    return true;
+    return flags.listWorkloadIdentities;
   }
   navigationItem = {
     title: NavTitle.WorkloadIdentity,
@@ -832,11 +822,10 @@ class FeatureDeviceTrust implements TeleportFeature {
     component: DeviceTrustLocked,
   };
 
+  discoverable = true;
+
   hasAccess(flags: FeatureFlags) {
-    if (shouldHideFromNavigation(cfg)) {
-      return flags.deviceTrust;
-    }
-    return true;
+    return flags.deviceTrust;
   }
 
   navigationItem = {
@@ -921,6 +910,8 @@ export class FeatureAccount implements TeleportFeature {
       'change password',
     ],
   };
+
+  supportsScopes = true;
 }
 
 export class FeatureHelpAndSupport implements TeleportFeature {
@@ -951,6 +942,8 @@ export class FeatureHelpAndSupport implements TeleportFeature {
       'version',
     ],
   };
+
+  supportsScopes = true;
 }
 
 export class FeatureScopes implements TeleportFeature {
@@ -962,6 +955,7 @@ export class FeatureScopes implements TeleportFeature {
   };
 
   hideNavigation = true;
+  supportsScopes = true;
 
   hasAccess(): boolean {
     return cfg.scopesEnabled;

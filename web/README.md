@@ -128,18 +128,22 @@ requests to the given target.
 
 ### Unit-Tests
 
-We use [jest](https://jestjs.io/) as our testing framework.
+We are migrating from [jest](https://jestjs.io/) to [vitest](https://vitest.dev/). Vitest owns
+`*.vitest.{ts,tsx}` files. Everything still on `*.test.{ts,tsx}` runs under jest.
 
-To run all jest unit-tests:
+To run all unit-tests under both runners:
 
 ```
 pnpm test
 ```
 
-To run jest in watch-mode
+`pnpm test` also takes paths and file names, routing each to the runner that owns it.
+
+To drive a runner directly, including watch-mode:
 
 ```
-pnpm tdd
+pnpm jest --watch
+pnpm vitest
 ```
 
 ### Interactive Testing
@@ -190,6 +194,20 @@ Install the [Oxc plugin](https://plugins.jetbrains.com/plugin/27061-oxc) from th
 pnpm format        # format all files
 pnpm format-check  # check without writing
 ```
+
+### Unused Exports
+
+[Knip](https://knip.dev/) runs in CI as part of `pnpm lint` and fails on exports that nothing
+imports. If an unused export has to stay (for example, an upcoming PR depends on it), tag it:
+
+```ts
+/** @allowunused TODO(your-github-username): remove once X lands. */
+export function futureThing() {}
+```
+
+The owner is required so suppressions don't accumulate with nobody responsible for removing them.
+A lint rule (`teleport/allowunused-todo`) enforces the format. Knip only reads JSDoc, so the tag
+must be in a `/** */` comment attached to the export.
 
 ### MFA Development
 

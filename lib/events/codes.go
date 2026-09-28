@@ -148,6 +148,8 @@ const (
 	AppSessionHTTPResponseBodyChunkCode = "T2018I"
 	// AppSessionTargetDialDeniedCode is the application target dial denied event code.
 	AppSessionTargetDialDeniedCode = "T2019E"
+	// AppSessionRequestDeniedCode is the fine-grained app access request denied event code.
+	AppSessionRequestDeniedCode = "T2020E"
 
 	// AppCreateCode is the app.create event code.
 	AppCreateCode = "TAP03I"
@@ -530,6 +532,13 @@ const (
 	// DeviceEnrollPairingRequestFailureCode is the device enroll pairing request
 	// failure code.
 	DeviceEnrollPairingRequestFailureCode = "TV010W"
+	// DeviceEnrollPairingApproveCode is the device enroll pairing approve code.
+	DeviceEnrollPairingApproveCode = "TV011I"
+	// DeviceEnrollPairingApproveFailureCode is the device enroll pairing approve
+	// failure code.
+	DeviceEnrollPairingApproveFailureCode = "TV011W"
+	// DeviceEnrollPairingDenyCode is the device enroll pairing deny code.
+	DeviceEnrollPairingDenyCode = "TV012W"
 
 	// LoginRuleCreateCode is the login rule create code.
 	LoginRuleCreateCode = "TLR00I"
@@ -879,19 +888,6 @@ const (
 
 	// ClientIPRestrictionsUpdateCode is the Client IP Restriction update event code.
 	ClientIPRestrictionsUpdateCode = "CIR001I"
-
-	// AppAuthConfigCreateCode is the app auth config create event code.
-	AppAuthConfigCreateCode = "TAAC001I"
-	// AppAuthConfigUpdateCode is the app auth config update event code.
-	AppAuthConfigUpdateCode = "TAAC002I"
-	// AppAuthConfigDeleteCode is the app auth config delete event code.
-	AppAuthConfigDeleteCode = "TAAC003I"
-	// AppAuthConfigVerifySuccessCode is the app auth verification success event
-	// code.
-	AppAuthConfigVerifySuccessCode = "TAAC004I"
-	// AppAuthConfigVerifyFailureCode is the app auth verification failure event
-	// code.
-	AppAuthConfigVerifyFailureCode = "TAAC004E"
 
 	// VnetConfigCreateCode is the Vnet config create event code.
 	VnetConfigCreateCode = "TVNET001I"

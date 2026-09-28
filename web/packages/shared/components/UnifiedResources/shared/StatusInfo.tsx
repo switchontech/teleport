@@ -291,10 +291,12 @@ function UnhealthyServerList({ servers }: { servers: SharedResourceServer[] }) {
         padding: ${p => p.theme.space[3]}px;
         border-left: 4px solid
           ${p => p.theme.colors.interactive.solid.alert.default};
-        ${index !== lastServerInList &&
-        css`
-          border-bottom: 1px solid ${p => p.theme.colors.spotBackground[1]};
-        `}
+        ${
+          index !== lastServerInList &&
+          css`
+            border-bottom: 1px solid ${p => p.theme.colors.spotBackground[1]};
+          `
+        }
       `}
     >
       <Text>
@@ -374,7 +376,7 @@ export function shouldWarnResourceStatus(
   return status === 'mixed' || status === 'unhealthy';
 }
 
-export const StyledUl = styled.ul`
+const StyledUl = styled.ul`
   margin: 0;
   padding-left: ${p => p.theme.space[4]}px;
   padding-bottom: ${p => p.theme.space[1]}px;

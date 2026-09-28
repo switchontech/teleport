@@ -39,11 +39,14 @@ resource, which you can apply after installing the Teleport Kubernetes operator.
 |bound_keypair|[object](#specbound_keypair)|Configuration specific to the "bound_keypair" join method.|
 |gcp|[object](#specgcp)|The GCP-specific configuration used with the "gcp" join method.|
 |generic_oidc|[object](#specgeneric_oidc)|Configuration specific to the "generic_oidc" join method.|
+|github|[object](#specgithub)|Configuration specific to the "github" join method.|
+|gitlab|[object](#specgitlab)|Configuration specific to the "gitlab" join method.|
 |immutable_labels|[object](#specimmutable_labels)|Immutable labels that should be applied to any resulting resources provisioned using this token.|
 |join_method|string|The joining method required in order to use this token. Note that not all join methods support joining with scoped tokens.|
 |kubernetes|[object](#speckubernetes)|The Kubernetes-specific configuration used with the "kubernetes" join method.|
 |oracle|[object](#specoracle)|The Oracle-specific configuration used with the "oracle" join method.|
 |roles|[]string|The list of roles associated with the token. They will be converted to metadata in the SSH and X509 certificates issued to the user of the token.|
+|tpm|[object](#spectpm)|Configuration specific to the "tpm" join method.|
 |usage_mode|string|The usage mode of the token. Can be "single_use" or "unlimited". Single use tokens can only be used to provision a single resource. Unlimited tokens can be be used to provision any number of resources until it expires.|
 
 ### spec.aws
@@ -188,6 +191,59 @@ resource, which you can apply after installing the Teleport Kubernetes operator.
 |---|---|---|
 |values|[]string||
 
+### spec.github
+
+|Field|Type|Description|
+|---|---|---|
+|allow|[][object](#specgithuballow-items)|allow is a set of claim-matching fields evaluated against the GitHub Actions OIDC token.|
+|enterprise_server_host|string|enterprise_server_host allows joining from runners associated with a GitHub Enterprise Server instance. When unconfigured, tokens will be validated against github.com, but when configured to the host of a GHES instance, then the tokens will be validated against host.  This value should be the hostname of the GHES instance, and should not include the scheme or a path. The instance must be accessible over HTTPS at this hostname and the certificate must be trusted by the Auth Service.|
+|enterprise_slug|string|enterprise_slug allows the slug of a GitHub Enterprise organisation to be included in the expected issuer of the OIDC tokens. This is for compatibility with the `include_enterprise_slug` option in GHE.  This field should be set to the slug of your enterprise if this is enabled. If this is not enabled, then this field must be left empty. This field cannot be specified if `enterprise_server_host` is specified.  See https://docs.github.com/en/enterprise-cloud@latest/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#customizing-the-issuer-value-for-an-enterprise for more information about customized issuer values.|
+|static_jwks|string|static_jwks disables fetching of the GHES signing keys via the JWKS/OIDC endpoints, and allows them to be directly specified. This allows joining from GitHub Actions in GHES instances that are not reachable by the Teleport Auth Service.|
+
+### spec.github.allow items
+
+|Field|Type|Description|
+|---|---|---|
+|actor|string||
+|enterprise|string||
+|enterprise_id|string||
+|environment|string||
+|ref|string||
+|ref_type|string||
+|repository|string||
+|repository_owner|string||
+|sub|string||
+|workflow|string||
+
+### spec.gitlab
+
+|Field|Type|Description|
+|---|---|---|
+|allow|[][object](#specgitlaballow-items)|A set of claim-matching fields evaluated against the GitLab CI token.|
+|domain|string|The domain of your GitLab instance. This will default to `gitlab.com` - but can be set to the domain of your self-hosted GitLab e.g `gitlab.example.com`.|
+|static_jwks|string|Disables fetching of the GitLab signing keys via the JWKS/OIDC endpoints, and allows them to be directly specified. This allows joining from GitLab CI instances that are not reachable by the Teleport Auth Service.|
+
+### spec.gitlab.allow items
+
+|Field|Type|Description|
+|---|---|---|
+|ci_config_ref_uri|string||
+|ci_config_sha|string||
+|deployment_tier|string||
+|environment|string||
+|environment_protected|boolean||
+|namespace_path|string||
+|pipeline_source|string||
+|project_path|string||
+|project_visibility|string||
+|ref|string||
+|ref_protected|boolean||
+|ref_type|string||
+|sub|string||
+|user_email|string||
+|user_id|string||
+|user_login|string||
+
 ### spec.immutable_labels
 
 |Field|Type|Description|
@@ -245,4 +301,19 @@ resource, which you can apply after installing the Teleport Kubernetes operator.
 |parent_compartments|[]string||
 |regions|[]string||
 |tenancy|string||
+
+### spec.tpm
+
+|Field|Type|Description|
+|---|---|---|
+|allow|[][object](#spectpmallow-items)|A list of Rules, the presented delegated identity must match one allow rule to permit joining.|
+|ekcert_allowed_cas|[]string|A list of CA certificates that will be used to validate TPM EKCerts. When specified, joining TPMs must present an EKCert signed by one of the specified CAs. TPMs that do not present an EKCert will be not permitted to join. When unspecified, TPMs will be allowed to join with either an EKCert or an EKPubHash.|
+
+### spec.tpm.allow items
+
+|Field|Type|Description|
+|---|---|---|
+|description|string||
+|ek_certificate_serial|string||
+|ek_public_hash|string||
 

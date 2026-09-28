@@ -75,6 +75,7 @@ import (
 	"github.com/gravitational/teleport/lib/sshutils"
 	reexecutils "github.com/gravitational/teleport/lib/sshutils/reexec"
 	"github.com/gravitational/teleport/lib/utils"
+	hostuser "github.com/gravitational/teleport/session/host/user"
 	"github.com/gravitational/teleport/session/networking"
 	"github.com/gravitational/teleport/session/networking/x11"
 	"github.com/gravitational/teleport/session/pam/pamcfg"
@@ -1103,7 +1104,7 @@ func (s *Server) startAuthorizedKeysManager(ctx context.Context, auth authclient
 			Clock:  s.clock,
 		},
 	)
-	if errors.Is(err, authorizedkeysreporter.ErrUnsupportedPlatform) {
+	if errors.Is(err, hostuser.ErrUnsupportedPlatform) {
 		return nil
 	} else if err != nil {
 		return trace.Wrap(err)
@@ -2460,20 +2461,49 @@ func (s *Server) handleTCPIPForwardRequest(ctx context.Context, ccx *sshutils.Co
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	defer scx.Close()
 	listener, err := s.listenTCPIP(ctx, scx, scx.SrcAddr)
 	if err != nil {
+		if serr := scx.Close(); serr != nil {
+			s.logger.DebugContext(ctx, "Failed while cleaning up request",
+				"request_type", teleport.TCPIPForwardRequest,
+				"server_context_close_error", serr,
+				"error", err)
+		}
 		return trace.Wrap(err)
 	}
 
 	// If the client didn't request a specific port, the chosen port needs to
 	// be reported back.
-	srcHost, _, err := sshutils.SplitHostPort(scx.SrcAddr)
+	srcHost, srcPort, err := sshutils.SplitHostPort(scx.SrcAddr)
 	if err != nil {
+		if lerr := listener.Close(); lerr != nil {
+			s.logger.DebugContext(ctx, "Failed while cleaning up request",
+				"request_type", teleport.TCPIPForwardRequest,
+				"listener_close_error", lerr,
+				"error", err)
+		}
+		if serr := scx.Close(); serr != nil {
+			s.logger.DebugContext(ctx, "Failed while cleaning up request",
+				"request_type", teleport.TCPIPForwardRequest,
+				"server_context_close_error", serr,
+				"error", err)
+		}
 		return trace.Wrap(err)
 	}
 	_, listenPort, err := sshutils.SplitHostPort(listener.Addr().String())
 	if err != nil {
+		if lerr := listener.Close(); lerr != nil {
+			s.logger.DebugContext(ctx, "Failed while cleaning up request",
+				"request_type", teleport.TCPIPForwardRequest,
+				"listener_close_error", lerr,
+				"error", err)
+		}
+		if serr := scx.Close(); serr != nil {
+			s.logger.DebugContext(ctx, "Failed while cleaning up request",
+				"request_type", teleport.TCPIPForwardRequest,
+				"server_context_close_error", serr,
+				"error", err)
+		}
 		return trace.Wrap(err)
 	}
 	scx.SrcAddr = sshutils.JoinHostPort(srcHost, listenPort)
@@ -2483,6 +2513,7 @@ func (s *Server) handleTCPIPForwardRequest(ctx context.Context, ccx *sshutils.Co
 
 	// spawn remote forwarding handler to multiplex connections to the forwarded port
 	go func() {
+		defer scx.Close()
 		stopEvent := scx.GetPortForwardEvent(events.PortForwardRemoteEvent, events.PortForwardStopCode, scx.SrcAddr)
 		defer s.emitAuditEventWithLog(ctx, &stopEvent)
 
@@ -2525,6 +2556,7 @@ func (s *Server) handleTCPIPForwardRequest(ctx context.Context, ccx *sshutils.Co
 				logger.WarnContext(ctx, "failed to open channel", "error", err)
 				continue
 			}
+			ch = scx.TrackActivity(ch)
 			go ssh.DiscardRequests(rch)
 			go io.Copy(io.Discard, ch.Stderr())
 			go func() {
@@ -2548,11 +2580,7 @@ func (s *Server) handleTCPIPForwardRequest(ctx context.Context, ccx *sshutils.Co
 	// Report addr back to the client.
 	if r.WantReply {
 		var payload []byte
-		req, err := sshutils.ParseTCPIPForwardReq(r.Payload)
-		if err != nil {
-			return trace.Wrap(err)
-		}
-		if req.Port == 0 {
+		if srcPort == 0 {
 			payload = ssh.Marshal(struct {
 				Port uint32
 			}{Port: uint32(listener.Addr().(*net.TCPAddr).Port)})

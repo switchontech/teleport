@@ -38,6 +38,7 @@ import {
 import { marginTransitionCss } from 'shared/components/SlidingSidePanel/InfoGuide/const';
 import { ToastNotifications } from 'shared/components/ToastNotification';
 import useAttempt from 'shared/hooks/useAttemptNext';
+import { useStore } from 'shared/libs/stores';
 
 import { BannerList } from 'teleport/components/BannerList';
 import type { BannerType } from 'teleport/components/BannerList/BannerList';
@@ -46,6 +47,7 @@ import { CatchError } from 'teleport/components/CatchError';
 import { Redirect, Route, Switch } from 'teleport/components/Router';
 import { InfoGuideSidePanel } from 'teleport/components/SlidingSidePanel/InfoGuideSidePanel';
 import cfg from 'teleport/config';
+import { canShowFeature } from 'teleport/features';
 import { FeaturesContextProvider, useFeatures } from 'teleport/FeaturesContext';
 import { Navigation } from 'teleport/Navigation';
 import {
@@ -72,6 +74,7 @@ export interface MainProps {
 
 export function Main(props: MainProps) {
   const ctx = useTeleport();
+  const storeUser = useStore(ctx.storeUser);
   const location = useLocation();
 
   const { attempt, setAttempt, run } = useAttempt('processing');
@@ -89,9 +92,15 @@ export function Main(props: MainProps) {
 
   const featureFlags = ctx.getFeatureFlags();
 
+  const scope = storeUser?.getScope();
   const features = useMemo(
-    () => props.features.filter(feature => feature.hasAccess(featureFlags)),
-    [featureFlags, props.features]
+    () =>
+      props.features.filter(
+        feature =>
+          canShowFeature(feature, featureFlags) &&
+          supportsCurrentScope(feature, scope)
+      ),
+    [featureFlags, props.features, scope]
   );
 
   const { alerts, dismissAlert } = useAlerts(props.initialAlerts);
@@ -130,7 +139,8 @@ export function Main(props: MainProps) {
     if (
       cfg.scopesEnabled &&
       availableScopes.length > 0 &&
-      !isScopePickerRoute
+      !isScopePickerRoute &&
+      !storageService.getScopeSelected()
     ) {
       return <Redirect to={history.getScopePickerUrl()} />;
     }
@@ -161,15 +171,13 @@ export function Main(props: MainProps) {
     return 'danger';
   };
 
-  const banners: BannerType[] = alerts.map(
-    (alert): BannerType => ({
-      message: alert.spec.message,
-      severity: mapSeverity(alert.spec.severity),
-      linkDestination: alert.metadata.labels[LINK_DESTINATION_LABEL],
-      linkText: alert.metadata.labels[LINK_TEXT_LABEL],
-      id: alert.metadata.name,
-    })
-  );
+  const banners: BannerType[] = alerts.map((alert): BannerType => ({
+    message: alert.spec.message,
+    severity: mapSeverity(alert.spec.severity),
+    linkDestination: alert.metadata.labels[LINK_DESTINATION_LABEL],
+    linkText: alert.metadata.labels[LINK_TEXT_LABEL],
+    id: alert.metadata.name,
+  }));
 
   return (
     <FeaturesContextProvider value={features}>
@@ -219,16 +227,24 @@ function renderRoutes(
       continue;
     }
 
-    // locked features: redirect to root instead of showing upgrade CTAs
+    // add the route of the 'locked' variants of the features
     if (feature.isLocked?.(lockedFeatures)) {
-      if (feature.lockedRoute) {
-        const { path, exact } = feature.lockedRoute;
-        routes.push(
-          <Route key={index} path={path} exact={exact}>
-            <Redirect to={cfg.routes.root} />
-          </Route>
-        );
+      if (!feature.lockedRoute) {
+        throw new Error('a locked feature without a locked route was found');
       }
+
+      const { path, title, exact, component: Component } = feature.lockedRoute;
+      routes.push(
+        <Route title={title} key={index} path={path} exact={exact}>
+          <CatchError>
+            <Suspense fallback={null}>
+              <Component />
+            </Suspense>
+          </CatchError>
+        </Route>
+      );
+
+      // return early so we don't add the original route
       continue;
     }
 
@@ -248,6 +264,13 @@ function renderRoutes(
   }
 
   return routes;
+}
+
+function supportsCurrentScope(
+  feature: TeleportFeature,
+  scope: string
+): boolean {
+  return !scope || feature.supportsScopes;
 }
 
 function FeatureRoutes({ lockedFeatures }: { lockedFeatures: LockedFeatures }) {

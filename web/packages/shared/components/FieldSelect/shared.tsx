@@ -33,12 +33,6 @@ import { Rule } from '../Validation/rules';
 
 export const defaultRule = () => () => ({ valid: true });
 
-export const LabelTip = ({ text }) => (
-  <span
-    css={{ fontWeight: 'normal', textTransform: 'none' }}
-  >{` - ${text}`}</span>
-);
-
 type FieldSelectWrapperPropsBase<Opt, IsMulti extends boolean> = {
   label?: string;
   toolTipContent?: React.ReactNode;
@@ -187,6 +181,7 @@ export function splitSelectProps<
     customProps,
     defaultValue,
     elevated,
+    getOptionValue,
     helperText,
     inputId,
     inputValue,
@@ -236,6 +231,7 @@ export function splitSelectProps<
       customProps,
       defaultValue,
       elevated,
+      getOptionValue,
       inputValue,
       isClearable,
       isDisabled,
@@ -284,6 +280,7 @@ type KeysRemovedFromOthers =
   | 'customProps'
   | 'defaultValue'
   | 'elevated'
+  | 'getOptionValue'
   | 'helperText'
   | 'inputId'
   | 'inputValue'

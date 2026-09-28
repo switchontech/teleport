@@ -105,6 +105,8 @@ func newSQLiteInMemoryQueue(cfg Config) (*sqliteInMemoryQueue, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	inner.wg.Go(inner.statsLoop)
+
 	return &sqliteInMemoryQueue{
 		inner:       inner,
 		id:          id,
@@ -129,6 +131,17 @@ func (m *sqliteInMemoryQueue) Run(ctx context.Context, handler Handler) error {
 	defer wg.Wait()
 
 	return m.inner.runPollLoop(ctx, handler)
+}
+
+// Drain makes a best-effort attempt to flush pending events upstream before
+// shutdown. See Queue.Drain.
+func (m *sqliteInMemoryQueue) Drain(ctx context.Context) error {
+	return m.inner.Drain(ctx)
+}
+
+// Stats reports the current depth of the in-memory queue. See Queue.Stats.
+func (m *sqliteInMemoryQueue) Stats(ctx context.Context) (Stats, error) {
+	return m.inner.Stats(ctx)
 }
 
 // Close shuts down the in-memory queue.

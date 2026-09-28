@@ -1,6 +1,6 @@
 module github.com/gravitational/teleport/integrations/terraform-mwi
 
-go 1.26.5
+go 1.26.7
 
 require (
 	github.com/gravitational/teleport v0.0.0-00010101000000-000000000000
@@ -47,6 +47,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/msi/armmsi v1.3.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/mysql/armmysql v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/mysql/armmysqlflexibleservers v1.2.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v7 v7.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresql v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresqlflexibleservers v1.1.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/redis/armredis/v3 v3.3.0 // indirect
@@ -187,7 +188,7 @@ require (
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
-	github.com/go-git/go-git/v5 v5.19.1 // indirect
+	github.com/go-git/go-git/v5 v5.19.2 // indirect
 	github.com/go-gorp/gorp/v3 v3.1.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
@@ -313,7 +314,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/kelseyhightower/envconfig v1.4.0 // indirect
 	github.com/keys-pub/go-libfido2 v1.5.3-0.20220306005615-8ab03fb1ec27 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -403,7 +404,7 @@ require (
 	github.com/sigstore/rekor v1.5.2 // indirect
 	github.com/sigstore/rekor-tiles/v2 v2.2.2-0.20260601073857-5d098a2b6443 // indirect
 	github.com/sigstore/sigstore v1.10.8 // indirect
-	github.com/sigstore/sigstore-go v1.2.0 // indirect
+	github.com/sigstore/sigstore-go v1.2.1 // indirect
 	github.com/sigstore/timestamp-authority/v2 v2.1.2 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
@@ -508,7 +509,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.53.0 // indirect
 	mvdan.cc/sh/v3 v3.7.0 // indirect
-	oras.land/oras-go/v2 v2.6.1 // indirect
+	oras.land/oras-go/v2 v2.6.2 // indirect
 	rsc.io/ordered v1.1.1 // indirect
 	sigs.k8s.io/controller-runtime v0.24.1 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect

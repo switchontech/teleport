@@ -51,7 +51,7 @@ export function Welcome({ NewCredentials }: WelcomeProps) {
     history.push(cfg.getUserResetTokenContinueRoute(tokenId));
   };
 
-  const productName = 'DeepInspect Pro';
+  const productName = cfg.getBeamsUi() ? 'Beams' : 'Teleport';
 
   return (
     <Switch>

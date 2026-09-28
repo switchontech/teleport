@@ -86,6 +86,7 @@ export function DefaultSection({
   return (
     <>
       <CategoryButton
+        data-testid="side-nav-category"
         ref={refs.setReference}
         $active={$active}
         isExpanded={isExpanded}
@@ -164,6 +165,7 @@ export const CustomChildrenSection = forwardRef<
   return (
     <>
       <CategoryButton
+        data-testid="side-nav-category"
         ref={ref}
         $active={$active}
         isExpanded={isExpanded}
@@ -193,7 +195,12 @@ export function StandaloneSection({
   $active: boolean;
 }) {
   return (
-    <CategoryButton as={NavLink} $active={$active} to={route}>
+    <CategoryButton
+      as={NavLink}
+      data-testid="side-nav-category"
+      $active={$active}
+      to={route}
+    >
       <Icon />
       {title}
     </CategoryButton>
@@ -320,11 +327,7 @@ export const CategoryButton = styled.button<{
   ${props => getCategoryStyles(props.theme, props.$active, props.isExpanded)}
 `;
 
-export function getCategoryStyles(
-  theme: Theme,
-  active: boolean,
-  isExpanded: boolean
-) {
+function getCategoryStyles(theme: Theme, active: boolean, isExpanded: boolean) {
   if (active) {
     return css`
       color: ${theme.colors.brand};
@@ -338,11 +341,13 @@ export function getCategoryStyles(
         background: ${theme.colors.interactive.tonal.primary[2]};
         color: ${theme.colors.interactive.solid.primary.active};
       }
-      ${isExpanded &&
-      `
+      ${
+        isExpanded &&
+        `
         background: ${theme.colors.interactive.tonal.primary[1]};
         color: ${theme.colors.interactive.solid.primary.default};
-      `}
+      `
+      }
     `;
   }
 
@@ -358,11 +363,13 @@ export function getCategoryStyles(
       background: ${theme.colors.interactive.tonal.neutral[1]};
       color: ${theme.colors.text.main};
     }
-    ${isExpanded &&
-    `
+    ${
+      isExpanded &&
+      `
       background: ${theme.colors.interactive.tonal.neutral[0]};
       color: ${theme.colors.text.main};
-      `}
+      `
+    }
   `;
 }
 
@@ -388,14 +395,14 @@ export function SubsectionItem({
       end={exact}
       tabIndex={0}
       onClick={onClick}
-      data-testid={to}
+      data-testid="side-nav-item"
     >
       {children}
     </StyledSubsectionItem>
   );
 }
 
-export const StyledSubsectionItem = styled(NavLink).withConfig({
+const StyledSubsectionItem = styled(NavLink).withConfig({
   shouldForwardProp: prop => prop !== '$active' && prop !== 'end',
 })<{
   $active: boolean;

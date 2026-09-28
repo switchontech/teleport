@@ -303,6 +303,9 @@ export
 # To avoid breaking other parts of the release pipeline, the easiest fix is to
 # unexport HELMJANITOR so the child uses the definition from its Makefile.
 unexport HELMJANITOR
+# Same as above for HELMJANITOR - without this unexport statement, the `-e` flag breaks terraform-docs recipes,
+# because every recipe becomes a blank command, e.g., `"" markdown table ...`
+unexport TERRAFORM_DOCS
 export KUBECONFIG
 export TEST_KUBE
 
@@ -395,6 +398,12 @@ ifeq ("$(GITHUB_REPOSITORY_OWNER)","gravitational")
 # This is done here to prevent any changes to the (BUI)LDFLAGS passed to the other binaries
 TELEPORT_LDFLAGS ?= -ldflags '$(GO_LDFLAGS) -X github.com/gravitational/teleport/lib/modules.teleportBuildType=community'
 TOOLS_LDFLAGS ?= -ldflags '$(GO_LDFLAGS) $(KUBECTL_SETVERSION) -X github.com/gravitational/teleport/lib/modules.teleportBuildType=community'
+TELEPORT_UPDATE_ARTIFACT_SIGNATURE_PUBLIC_KEY_B64 ?=
+TELEPORT_UPDATE_ARTIFACT_SIGNATURE_BACKUP_PUBLIC_KEY_B64 ?=
+TELEPORT_UPDATE_ARTIFACT_SIGNATURE_ADDITIONAL_PUBLIC_KEY_B64 ?=
+TELEPORT_UPDATE_ARTIFACT_SIGNATURE_ADDITIONAL_BACKUP_PUBLIC_KEY_B64 ?=
+TELEPORT_UPDATE_DEV_BUILD ?=
+TELEPORT_UPDATE_LDFLAGS ?= -ldflags '$(GO_LDFLAGS) $(KUBECTL_SETVERSION) -X github.com/gravitational/teleport/lib/modules.teleportBuildType=community -X main.artifactSignaturePublicKeyB64=$(TELEPORT_UPDATE_ARTIFACT_SIGNATURE_PUBLIC_KEY_B64) -X main.artifactSignatureBackupPublicKeyB64=$(TELEPORT_UPDATE_ARTIFACT_SIGNATURE_BACKUP_PUBLIC_KEY_B64) -X main.artifactSignatureAdditionalPublicKeyB64=$(TELEPORT_UPDATE_ARTIFACT_SIGNATURE_ADDITIONAL_PUBLIC_KEY_B64) -X main.artifactSignatureAdditionalBackupPublicKeyB64=$(TELEPORT_UPDATE_ARTIFACT_SIGNATURE_ADDITIONAL_BACKUP_PUBLIC_KEY_B64)'
 endif
 
 # By making these 3 targets below (tsh, tctl and teleport) PHONY we are solving
@@ -459,7 +468,11 @@ $(BUILDDIR)/tbot:
 
 .PHONY: $(BUILDDIR)/teleport-update
 $(BUILDDIR)/teleport-update:
-	GOOS=$(OS) GOARCH=$(ARCH) CGO_ENABLED=0 go build -tags "grpcnotrace $(FIPS_TAG)" -o $(BUILDDIR)/teleport-update $(BUILDFLAGS_TELEPORT_UPDATE) $(TOOLS_LDFLAGS) ./tool/teleport-update
+	@if [[ (-z "$(TELEPORT_UPDATE_ARTIFACT_SIGNATURE_PUBLIC_KEY_B64)" || -z "$(TELEPORT_UPDATE_ARTIFACT_SIGNATURE_BACKUP_PUBLIC_KEY_B64)") && "$(TELEPORT_UPDATE_DEV_BUILD)" != "1" ]]; then \
+		echo "TELEPORT_UPDATE_ARTIFACT_SIGNATURE_PUBLIC_KEY_B64 and TELEPORT_UPDATE_ARTIFACT_SIGNATURE_BACKUP_PUBLIC_KEY_B64 must be set when building teleport-update (or set TELEPORT_UPDATE_DEV_BUILD=1 for unsigned dev builds)" >&2; \
+		exit 1; \
+	fi
+	GOOS=$(OS) GOARCH=$(ARCH) CGO_ENABLED=0 go build -tags "grpcnotrace $(FIPS_TAG)" -o $(BUILDDIR)/teleport-update $(BUILDFLAGS_TELEPORT_UPDATE) $(TELEPORT_UPDATE_LDFLAGS) ./tool/teleport-update
 
 TELEPORT_ARGS ?= start
 .PHONY: teleport-hot-reload
@@ -1311,6 +1324,25 @@ integration-root: session/reexec/embed/sessionhelper | $(TEST_LOG_DIR)
 	$(CGOFLAG) go test -json -tags '$(SESSIONHELPER_EMBED_TAG)' -run "$(INTEGRATION_ROOT_REGEX)" $(PACKAGES) $(FLAGS) \
 		| $(GOTESTSUM) --junitfile $(TEST_LOG_DIR)/unit-tests-integration-root.xml --jsonfile $(TEST_LOG_DIR)/unit-tests-integration-root.json --raw-command -- cat
 
+INTEGRATION_TEST_TIMEOUT ?= 10m
+.PHONY: integration-e
+integration-e: FLAGS ?= -race -shuffle on
+integration-e: SUBJECT ?= ./e/tests/integration/...
+integration-e: | $(TEST_LOG_DIR)
+ifneq ("$(SUBJECT)", "")
+	$(CGOFLAG) go test -timeout=$(INTEGRATION_TEST_TIMEOUT) -json $(PACKAGES) $(SUBJECT) $(FLAGS) $(ADDFLAGS) \
+		| $(GOTESTSUM) --junitfile $(TEST_LOG_DIR)/unit-tests-integration-e.xml --jsonfile $(TEST_LOG_DIR)/unit-tests-integration.json --raw-command -- cat;
+endif
+
+# test-antithesis-workloads runs tests in the Antithesis workloads Go module.
+.PHONY: test-antithesis-workloads
+test-antithesis-workloads: FLAGS ?= -race -shuffle on
+test-antithesis-workloads: SUBJECT ?= ./...
+test-antithesis-workloads: WORKLOAD_GO_TAGS ?= antithesis
+test-antithesis-workloads: | $(TEST_LOG_DIR)
+ifneq ("$(SUBJECT)", "")
+	cd ./e/tests/antithesis/workloads && $(GOTESTSUM) --junitfile $(TEST_LOG_DIR)/unit-tests-antithesis-workloads.xml --jsonfile $(TEST_LOG_DIR)/unit-tests-antithesis-workloads.json -- $(SUBJECT) $(FLAGS) -tags "$(WORKLOAD_GO_TAGS)" $(ADDFLAGS)
+endif
 
 .PHONY: e2e-aws
 e2e-aws: FLAGS ?= -v -race
@@ -1332,7 +1364,7 @@ e2e-binaries:
 # changes (or last commit).
 #
 .PHONY: lint
-lint: lint-api lint-go lint-kube-agent-updater lint-tools lint-protos lint-no-actions
+lint: lint-api lint-go lint-kube-agent-updater lint-tools lint-protos lint-no-actions lint-e2e-runner
 
 #
 # Runs linters without dedicated GitHub Actions.
@@ -1414,6 +1446,15 @@ lint-kube-agent-updater: GO_LINT_API_FLAGS ?=
 lint-kube-agent-updater:
 	cd integrations/kube-agent-updater && golangci-lint run -c ../../.golangci.yml $(GO_LINT_API_FLAGS)
 
+# e2e/runner is its own module, so the root golangci-lint run doesn't reach it.
+.PHONY: lint-e2e-runner
+lint-e2e-runner: GO_LINT_FLAGS ?=
+lint-e2e-runner:
+# The e2e tree is stripped from the OSS export, so this is a no-op there rather than a failure.
+ifneq ("$(wildcard e2e/runner)","")
+	cd e2e/runner && golangci-lint run -c ../../.golangci.yml $(GO_LINT_FLAGS)
+endif
+
 # TODO(awly): remove the `--exclude` flag after cleaning up existing scripts
 .PHONY: lint-sh
 lint-sh: SH_LINT_FLAGS ?=
@@ -1462,6 +1503,7 @@ ADDLICENSE_COMMON_ARGS := -c 'Gravitational, Inc.' \
 		-ignore 'build.assets/.cache/**' \
 		-ignore 'docs/pages/includes/**/*.go' \
 		-ignore 'e/**' \
+		-ignore 'e2e/**' \
 		-ignore 'gen/**' \
 		-ignore 'gitref.go' \
 		-ignore 'lib/limiter/internal/ratelimit/**' \
@@ -1497,7 +1539,7 @@ fix-license:
 # Used prior to a release by bumping VERSION in this Makefile and then
 # running "make update-version".
 .PHONY: update-version
-update-version: version test-helm-update-snapshots
+update-version: version
 
 # This rule triggers re-generation of version files if Makefile changes.
 .PHONY: version
@@ -1530,7 +1572,6 @@ update-tag:
 	cd build.assets/tooling && GOWORK=off CGO_ENABLED=0 go run ./cmd/check -check valid -tag $(GITTAG)
 	git tag $(GITTAG)
 	git tag api/$(GITTAG)
-	(cd e && git tag $(GITTAG) && git push origin $(GITTAG))
 	git push $(TAG_REMOTE) $(GITTAG) && git push $(TAG_REMOTE) api/$(GITTAG)
 
 # find-any evaluates to non-empty (true) if any of the strings in $(1) are contained in $(2)
@@ -1550,6 +1591,21 @@ IS_CLOUD_SEMVER = $(call find-any,$(CLOUD_VERSIONS),$(VERSION))
 PROD_VERSIONS = -cloud.
 IS_PROD_SEMVER = $(if $(findstring -,$(VERSION)),$(call find-any,$(PROD_VERSIONS),$(VERSION)),true)
 
+# TAG_WORKFLOW_REF sets the teleport.e ref that will be used for tag-build and tag-publish
+# This can be overriden to choose a specific teleport.e ref to build from
+# By default, this parses the VERSION to find the major and maps to a branch
+#   - v19: master
+#   - v18: branch/v18
+#   - v17: branch/v17
+#
+# This is only a temporary measure to allow the monorepo to still continue doing releases from teleport.e
+# This will be removed once release workflow is migrated to core
+VERSION_MAJOR = $(patsubst v%,%,$(word 1,$(subst ., ,$(VERSION))))
+TAG_WORKFLOW_REF_19 = master
+TAG_WORKFLOW_REF_18 = branch/v18
+TAG_WORKFLOW_REF_17 = branch/v17
+TAG_WORKFLOW_REF = $(or $(TAG_WORKFLOW_REF_$(VERSION_MAJOR)),$(error no tag workflow ref configured for VERSION=$(VERSION)))
+
 # Builds a tag build on GitHub Actions.
 # Starts a tag publish run using e/.github/workflows/tag-build.yaml
 # for the tag v$(VERSION).
@@ -1559,15 +1615,17 @@ IS_PROD_SEMVER = $(if $(findstring -,$(VERSION)),$(call find-any,$(PROD_VERSIONS
 .PHONY: tag-build
 tag-build: CLOUD_ONLY = $(if $(IS_CLOUD_SEMVER),true,false)
 tag-build: ENVIRONMENT = $(if $(IS_PROD_SEMVER),prod/build,stage/build)
+tag-build: MANAGED_UPDATES_SIGNING_KEY ?= primary
 tag-build:
 	@which gh >/dev/null 2>&1 || { echo 'gh command needed. https://github.com/cli/cli'; exit 1; }
 	gh workflow run tag-build.yaml \
 		--repo gravitational/teleport.e \
-		--ref "v$(VERSION)" \
+		--ref "$(TAG_WORKFLOW_REF)" \
 		-f "oss-teleport-repo=$(shell gh repo view --json nameWithOwner --jq .nameWithOwner)" \
 		-f "oss-teleport-ref=v$(VERSION)" \
 		-f "cloud-only=$(CLOUD_ONLY)" \
-		-f "environment=$(ENVIRONMENT)"
+		-f "environment=$(ENVIRONMENT)" \
+		-f "managed-updates-signing-key=$(MANAGED_UPDATES_SIGNING_KEY)"
 	@echo See runs at: https://github.com/gravitational/teleport.e/actions/workflows/tag-build.yaml
 
 # Publishes a tag build.
@@ -1583,7 +1641,7 @@ tag-publish:
 	@which gh >/dev/null 2>&1 || { echo 'gh command needed. https://github.com/cli/cli'; exit 1; }
 	gh workflow run tag-publish.yaml \
 		--repo gravitational/teleport.e \
-		--ref "v$(VERSION)" \
+		--ref "$(TAG_WORKFLOW_REF)" \
 		-f "oss-teleport-repo=$(shell gh repo view --json nameWithOwner --jq .nameWithOwner)" \
 		-f "oss-teleport-ref=v$(VERSION)" \
 		-f "cloud-only=$(CLOUD_ONLY)" \
@@ -1972,23 +2030,43 @@ ensure-js-deps:
 ifeq ($(WEBASSETS_SKIP_BUILD),1)
 ensure-wasm-deps:
 else
-ensure-wasm-deps: ensure-llvm-macos rustup-toolchain-warning ensure-wasm-bindgen ensure-wasm-opt
+ensure-wasm-deps: ensure-llvm rustup-toolchain-warning ensure-wasm-bindgen ensure-wasm-opt
 
-.PHONY: ensure-llvm-macos
-ifeq ("$(OS)-$(ARCH)","darwin-arm64")
+.PHONY: ensure-llvm
+ifeq ("$(OS)","darwin")
 BREW_DIR = $(shell brew --prefix)
 LLVM_PREFIX = $(shell brew list | grep llvm | head -n 1)
 LLVM_DIR = $(shell brew --prefix $(LLVM_PREFIX))
-CC = $(LLVM_DIR)/bin/clang
-AR = $(LLVM_DIR)/bin/llvm-ar
-ensure-llvm-macos:
-	@if [[ "${BREW_DIR}" = "${LLVM_DIR}" ]]; then \
+# Prevent these from being exported and expanded for every recipe.
+unexport BREW_DIR LLVM_PREFIX LLVM_DIR
+
+# The ironrdp WASM build needs clang/llvm-ar.
+# These are applied as target-specific variables so
+# brew is only invoked when necessary and so that
+# CC and AR are only overwritten for WASM compilation.
+build-ironrdp-wasm: CC = $(LLVM_DIR)/bin/clang
+build-ironrdp-wasm: AR = $(LLVM_DIR)/bin/llvm-ar
+
+ensure-llvm:
+	@if [[ "$(BREW_DIR)" = "$(LLVM_DIR)" ]]; then \
 		echo "llvm is required, please run 'brew install llvm' and add '/opt/homebrew/opt/llvm/bin' at the start of PATH variable"; \
 		exit 1; \
 	fi
 
+else ifeq ("$(OS)","windows")
+LLVM_DIR=$(shell vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)
+unexport LLVM_DIR
+build-ironrdp-wasm: CC = $(LLVM_DIR)/VC/Tools/Llvm/x64/bin/clang
+build-ironrdp-wasm: AR = $(LLVM_DIR)/VC/Tools/Llvm/x64/bin/llvm-ar
+
+ensure-llvm:
+	@if [[ "x" = "x$(LLVM_DIR)" ]]; then \
+		echo "llvm is required, please install Visual Studio with LLVM component"; \
+		exit 1; \
+	fi
+
 else
-ensure-llvm-macos:
+ensure-llvm:
 endif
 
 WASM_BINDGEN_VERSION = $(shell awk ' \
@@ -2080,7 +2158,7 @@ export rust_shadowed_warning
 # on PATH is not rustup-managed (e.g. the Homebrew 'rust' formula), which
 # silently bypasses the toolchain file even though the checks below pass.
 .PHONY: rustup-toolchain-warning
-rustup-toolchain-warning: EXPECTED = $(shell $(MAKE) print-rust-toolchain-version)
+rustup-toolchain-warning: EXPECTED = $(shell $(MAKE) --no-print-directory print-rust-toolchain-version)
 rustup-toolchain-warning:
 	@if [ "$(shell rustup show active-toolchain | cut -d'-' -f1)" != "$(EXPECTED)" ]; then \
 		echo -en "\033[31m";\
@@ -2182,11 +2260,7 @@ cli-docs-tctl:
 .PHONY: cli-docs-up-to-date
 cli-docs-up-to-date: must-start-clean/host cli-docs
 	@if ! git diff --quiet -- docs/pages/reference/cli/; then \
-		echo ""; \
-		echo "CLI reference documentation is out of date."; \
-		echo "Please run 'make cli-docs' and commit the changes."; \
-		echo ""; \
-		git diff --stat -- docs/pages/reference/cli/; \
+		./build.assets/please-run.sh "CLI reference documentation" "make cli-docs"; \
 		exit 1; \
 	fi
 

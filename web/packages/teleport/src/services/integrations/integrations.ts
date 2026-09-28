@@ -550,6 +550,8 @@ export const integrationService = {
           subscription_id: resp.discoverAzureVm?.subscription_id,
           resource_group: resp.discoverAzureVm?.resource_group,
           region: resp.discoverAzureVm?.region,
+          tenant_id: resp.discoverAzureVm?.tenant_id,
+          client_id: resp.discoverAzureVm?.client_id,
         },
       };
     });
@@ -636,11 +638,6 @@ function makeDatabaseServices(json: any): AWSOIDCDeployedDatabaseService[] {
   }));
 }
 
-export function makeIntegrations(json: any): Integration[] {
-  json = json || [];
-  return json.map(user => makeIntegration(user));
-}
-
 function makeIntegration(json: any): Integration {
   json = json || {};
   const {
@@ -680,6 +677,7 @@ function makeIntegration(json: any): Integration {
         issuerS3Bucket: awsoidc?.issuerS3Bucket,
         issuerS3Prefix: awsoidc?.issuerS3Prefix,
         audience: awsoidc?.audience,
+        organization: awsoidc?.organization,
       },
     };
   }

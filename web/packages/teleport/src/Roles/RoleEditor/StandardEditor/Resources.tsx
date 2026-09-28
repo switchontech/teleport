@@ -61,6 +61,8 @@ import {
   KubernetesResourceModel,
   kubernetesVerbOptions,
   newKubernetesResourceModel,
+  LinuxDesktopAccess,
+  LinuxDesktopAccessInputFields,
   ResourceAccess,
   ResourceAccessKind,
   ServerAccess,
@@ -76,6 +78,7 @@ import {
   GitHubOrganizationAccessValidationResult,
   KubernetesAccessValidationResult,
   KubernetesResourceValidationResult,
+  LinuxDesktopAccessValidationResult,
   ResourceAccessValidationResult,
   ServerAccessValidationResult,
   v7kubernetesClusterWideResourceKinds,
@@ -174,6 +177,7 @@ const allResourceAccessKinds: ResourceAccessKind[] = [
   'app',
   'db',
   'windows_desktop',
+  'linux_desktop',
   'git_server',
 ];
 
@@ -205,6 +209,10 @@ export const resourceAccessSections: Record<
     title: 'Windows Desktop Access',
     component: WindowsDesktopAccessSection,
   },
+  linux_desktop: {
+    title: 'Linux Desktop Access',
+    component: LinuxDesktopAccessSection,
+  },
   git_server: {
     title: 'GitHub Organization Access',
     component: GitHubOrganizationAccessSection,
@@ -215,7 +223,7 @@ export const resourceAccessSections: Record<
  * A generic resource section. Details are rendered by components from the
  * `resourceAccessSections` map.
  */
-export const ResourceAccessSection = memo(function ResourceAccessSectionRaw<
+const ResourceAccessSection = memo(function ResourceAccessSectionRaw<
   T extends ResourceAccess,
   V extends ResourceAccessValidationResult,
 >({
@@ -914,6 +922,61 @@ export function WindowsDesktopAccessSection({
           label="Logins"
           placeholder={readOnly ? '' : 'Type a login and press Enter'}
           toolTipContent="List of Windows logins allowed to use for desktop sessions."
+          isDisabled={isProcessing}
+          formatCreateLabel={label => `Login: ${label}`}
+          components={{
+            DropdownIndicator: null,
+          }}
+          openMenuOnClick={false}
+          value={value.logins}
+          onChange={logins => onChange?.({ ...value, logins: [...logins] })}
+          menuPosition="fixed"
+          readOnly={readOnly}
+          rule={readOnly ? undefined : precomputed(validation.fields.logins)}
+        />
+      )}
+    </>
+  );
+}
+
+export function LinuxDesktopAccessSection({
+  value,
+  isProcessing,
+  validation,
+  onChange,
+  readOnly = false,
+  visibleInputFields,
+}: SectionProps<
+  LinuxDesktopAccess,
+  LinuxDesktopAccessValidationResult,
+  LinuxDesktopAccessInputFields
+>) {
+  const show: LinuxDesktopAccessInputFields = visibleInputFields ?? {
+    labels: true,
+    logins: true,
+  };
+
+  return (
+    <>
+      {show.labels && (
+        <Box mb={3}>
+          <LabelsInput
+            atLeastOneRow
+            legend="Labels"
+            disableBtns={isProcessing}
+            labels={value.labels}
+            setLabels={labels => onChange?.({ ...value, labels })}
+            readOnly={readOnly}
+            rule={readOnly ? undefined : precomputed(validation.fields.labels)}
+          />
+        </Box>
+      )}
+      {show.logins && (
+        <FieldSelectCreatable
+          isMulti
+          label="Logins"
+          placeholder={readOnly ? '' : 'Type a login and press Enter'}
+          toolTipContent="List of Linux logins allowed to use for desktop sessions."
           isDisabled={isProcessing}
           formatCreateLabel={label => `Login: ${label}`}
           components={{

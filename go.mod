@@ -1,6 +1,6 @@
 module github.com/gravitational/teleport
 
-go 1.26.5
+go 1.26.7
 
 ignore (
 	./build
@@ -35,6 +35,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/msi/armmsi v1.3.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/mysql/armmysql v1.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/mysql/armmysqlflexibleservers v1.2.0
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v7 v7.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresql v1.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresqlflexibleservers v1.1.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/redis/armredis/v3 v3.3.0
@@ -128,7 +129,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/ghodss/yaml v1.0.0
 	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667
-	github.com/go-git/go-git/v5 v5.19.1
+	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-jose/go-jose/v3 v3.0.5
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-ldap/ldap/v3 v3.4.12
@@ -181,7 +182,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/keys-pub/go-libfido2 v1.5.3-0.20220306005615-8ab03fb1ec27
-	github.com/klauspost/compress v1.18.6
+	github.com/klauspost/compress v1.18.7
 	github.com/mailgun/mailgun-go/v4 v4.23.0
 	github.com/mark3labs/mcp-go v0.48.0
 	github.com/mattn/go-shellwords v1.0.13
@@ -218,7 +219,7 @@ require (
 	github.com/sigstore/cosign/v3 v3.0.6
 	github.com/sigstore/protobuf-specs v0.5.1
 	github.com/sigstore/sigstore v1.10.8
-	github.com/sigstore/sigstore-go v1.2.0
+	github.com/sigstore/sigstore-go v1.2.1
 	github.com/sijms/go-ora/v2 v2.9.0
 	github.com/snowflakedb/gosnowflake v1.17.0
 	github.com/spf13/cobra v1.10.2
@@ -432,7 +433,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/cel-go v0.27.0 // indirect
+	github.com/google/cel-go v0.29.0 // indirect
 	github.com/google/certificate-transparency-go v1.3.3 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
@@ -498,11 +499,11 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
-	github.com/moby/go-archive v0.2.0 // indirect
+	github.com/moby/go-archive v0.3.0 // indirect
 	github.com/moby/patternmatcher v0.6.1 // indirect
 	github.com/moby/spdystream v0.5.1 // indirect
-	github.com/moby/sys/sequential v0.6.0 // indirect
-	github.com/moby/sys/user v0.4.0 // indirect
+	github.com/moby/sys/sequential v0.7.0 // indirect
+	github.com/moby/sys/user v0.4.1 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
@@ -614,7 +615,7 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	mvdan.cc/sh/v3 v3.7.0 // indirect
-	oras.land/oras-go/v2 v2.6.1 // indirect
+	oras.land/oras-go/v2 v2.6.2 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/kustomize/api v0.21.1 // indirect
 	sigs.k8s.io/kustomize/kustomize/v5 v5.8.1 // indirect

@@ -15,14 +15,14 @@
 // along with this program.  If not, see http://www.gnu.org/licenses/
 
 import Foundation
+import Logging
 import Observation
-import OSLog
 import SQLiteData
 import SwiftNavigation
 
 @Observable @MainActor
 final class LandingViewModel {
-	static let logger = Logger.forType(LandingView.self)
+	private let logger = Logger.forType(LandingView.self)
 
 	// swiftformat:sort
 	@CasePathable
@@ -31,6 +31,9 @@ final class LandingViewModel {
 		case enrollDevice(EnrollDeviceViewModel)
 		case forgetAllClustersAlert(AlertState<ForgetAllClustersAlertAction>)
 		case notice(AlertState<Void>)
+		#if DEBUG
+			case debug(DebugViewModel)
+		#endif
 	}
 
 	@ObservationIgnored
@@ -120,6 +123,12 @@ extension LandingViewModel {
 	func userConfirmedForgetAllClusters() async {
 		await deleteClusters { Cluster.delete() }
 	}
+
+	#if DEBUG
+	func userTappedOnDebugButton() {
+		destination = .debug(DebugViewModel())
+	}
+	#endif
 }
 
 // MARK: - Programmatic Navigation
@@ -172,7 +181,7 @@ extension LandingViewModel {
 				try deleteOperation().execute(db)
 			}
 		} catch {
-			Self.logger.warning("Failed to forget clusters: \(error)")
+			logger.warning("Failed to forget clusters", error: error)
 			destination = .notice(AlertState(
 				title: {
 					TextState("Could Not Forget Clusters")

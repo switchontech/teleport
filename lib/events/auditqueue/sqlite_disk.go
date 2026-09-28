@@ -46,6 +46,7 @@ const (
 	tmpDirSuffix              = ".tmp"
 	defaultSoftLimit          = 100 * 1024 * 1024 // 100 MiB
 	softLimitCheckInterval    = time.Minute
+	defaultStatsInterval      = 15 * time.Second
 
 	initQueueDirMaxAttempts = 10
 	initQueueDirRetryDelay  = 50 * time.Millisecond
@@ -146,6 +147,7 @@ func newSQLiteQueue(cfg Config) (*sqliteQueue, error) {
 
 	q.wg.Go(q.softLimitLoop)
 	q.wg.Go(q.vacuumLoop)
+	q.wg.Go(q.statsLoop)
 
 	return q, nil
 }
@@ -307,7 +309,7 @@ func (q *sqliteQueue) Run(ctx context.Context, handler Handler) error {
 func (q *sqliteQueue) orphanScanLoop(ctx context.Context) {
 	ticker := time.NewTicker(q.orphanScanInterval)
 	defer ticker.Stop()
-	for {
+	for !q.isDraining() {
 		q.sweepStaleTmp()
 		q.adoptOrphans(ctx)
 
@@ -316,8 +318,19 @@ func (q *sqliteQueue) orphanScanLoop(ctx context.Context) {
 			return
 		case <-q.ctx.Done():
 			return
+		case <-q.drainCh:
+			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func (q *sqliteQueue) isDraining() bool {
+	select {
+	case <-q.drainCh:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -540,13 +553,16 @@ func (q *sqliteQueue) migrateOrphanDB(ctx context.Context, db *sql.DB, name stri
 	if err := q.migrateOrphanQueue(ctx, db, name); err != nil {
 		return trace.Wrap(err)
 	}
-	return trace.Wrap(q.migrateOrphanDeadLetter(ctx, db, name))
+	if err := q.migrateOrphanDeadLetter(ctx, db, name); err != nil {
+		return trace.Wrap(err)
+	}
+	return trace.Wrap(q.migrateOrphanCorruptEvents(ctx, db, name))
 }
 
 func (q *sqliteQueue) migrateOrphanQueue(ctx context.Context, orphan *sql.DB, name string) error {
 	return q.migrateOrphanTable(ctx, orphan, name, auditQueueTable,
-		"SELECT id, payload, attempts FROM audit_queue WHERE id > ? ORDER BY id ASC LIMIT ?",
-		"INSERT INTO audit_queue (payload, attempts) VALUES (?, ?)",
+		"SELECT id, payload, attempts, enqueued_at FROM audit_queue WHERE id > ? ORDER BY id ASC LIMIT ?",
+		"INSERT INTO audit_queue (payload, attempts, enqueued_at) VALUES (?, ?, ?)",
 	)
 }
 
@@ -614,9 +630,10 @@ func (q *sqliteQueue) readOrphanWatermark(ctx context.Context, key string) (int6
 
 func (q *sqliteQueue) clearOrphanWatermarks(ctx context.Context, name string) {
 	if _, err := q.db.ExecContext(ctx,
-		"DELETE FROM teleport_info WHERE key IN (?, ?)",
+		"DELETE FROM teleport_info WHERE key IN (?, ?, ?)",
 		orphanWatermarkKey(name, auditQueueTable),
 		orphanWatermarkKey(name, auditDeadLetterTable),
+		orphanWatermarkKey(name, corruptEventsTable),
 	); err != nil {
 		slog.ErrorContext(q.ctx,
 			"Failed to clear orphan migration watermarks.",
@@ -682,11 +699,22 @@ func (q *sqliteQueue) insertMigratedBatch(ctx context.Context, insertSQL string,
 	return trace.Wrap(tx.Commit())
 }
 
+func (q *sqliteQueue) migrateOrphanCorruptEvents(ctx context.Context, orphan *sql.DB, name string) error {
+	return q.migrateOrphanTable(ctx, orphan, name, corruptEventsTable,
+		"SELECT id, payload, error, source, failed_at FROM corrupt_events WHERE id > ? ORDER BY id ASC LIMIT ?",
+		"INSERT INTO corrupt_events (payload, error, source, failed_at) VALUES (?, ?, ?, ?)",
+	)
+}
+
 func (q *sqliteQueue) Close() error {
 	var errs []error
 	q.closeOnce.Do(func() {
 		q.cancel()
 		q.wg.Wait()
+
+		label := filepath.Base(q.path)
+		queuePending.DeleteLabelValues(label)
+		queueDeadLetter.DeleteLabelValues(label)
 
 		// Flush the WAL file.
 		if _, err := q.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
@@ -727,11 +755,13 @@ func (q *sqliteQueue) Close() error {
 	return trace.NewAggregate(errs...)
 }
 
+const isEmptyQuery = `SELECT EXISTS(SELECT 1 FROM audit_queue)
+	OR EXISTS(SELECT 1 FROM audit_dead_letter)
+	OR EXISTS(SELECT 1 FROM corrupt_events)`
+
 func isQueueEmpty(db *sql.DB) (bool, error) {
 	var hasRows int
-	err := db.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM audit_queue) OR EXISTS(SELECT 1 FROM audit_dead_letter)",
-	).Scan(&hasRows)
+	err := db.QueryRow(isEmptyQuery).Scan(&hasRows)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}

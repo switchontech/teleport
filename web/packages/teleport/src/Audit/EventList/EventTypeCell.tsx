@@ -25,7 +25,7 @@ import Text from 'design/Text/Text';
 
 import { Event, EventCode, eventCodes } from 'teleport/services/audit';
 
-export const EventIconMap: Record<EventCode, any> = {
+const EventIconMap: Record<EventCode, any> = {
   [eventCodes.AUTH_ATTEMPT_FAILURE]: Icons.Info,
   [eventCodes.EXEC_FAILURE]: Icons.Cli,
   [eventCodes.EXEC]: Icons.Cli,
@@ -81,6 +81,7 @@ export const EventIconMap: Record<EventCode, any> = {
   [eventCodes.APP_SESSION_HTTP_RESPONSE_BODY_CHUNK]: Icons.Info,
   [eventCodes.APP_SESSION_TARGET_DIAL_DENIED]: Icons.Warning,
   [eventCodes.APP_SESSION_DYNAMODB_REQUEST]: Icons.Database,
+  [eventCodes.APP_SESSION_REQUEST_DENIED]: Icons.Warning,
   [eventCodes.APP_CREATED]: Icons.Code,
   [eventCodes.APP_UPDATED]: Icons.Code,
   [eventCodes.APP_DELETED]: Icons.Code,
@@ -208,6 +209,9 @@ export const EventIconMap: Record<EventCode, any> = {
   [eventCodes.DEVICE_AUTHENTICATE_CONFIRM]: Icons.Info,
   [eventCodes.DEVICE_ENROLL_PAIRING_REQUEST]: Icons.Info,
   [eventCodes.DEVICE_ENROLL_PAIRING_REQUEST_FAILURE]: Icons.Info,
+  [eventCodes.DEVICE_ENROLL_PAIRING_APPROVE]: Icons.Info,
+  [eventCodes.DEVICE_ENROLL_PAIRING_APPROVE_FAILURE]: Icons.Info,
+  [eventCodes.DEVICE_ENROLL_PAIRING_DENY]: Icons.Info,
   [eventCodes.MFA_DEVICE_ADD]: Icons.Info,
   [eventCodes.MFA_DEVICE_DELETE]: Icons.Info,
   [eventCodes.BILLING_CARD_CREATE]: Icons.CreditCard,
@@ -363,11 +367,6 @@ export const EventIconMap: Record<EventCode, any> = {
   [eventCodes.SCIM_RESOURCE_PATCH]: Icons.Info,
   [eventCodes.SCIM_RESOURCE_PATCH_FAILURE]: Icons.Warning,
   [eventCodes.CLIENT_IP_RESTRICTIONS_UPDATE]: Icons.Info,
-  [eventCodes.APPAUTHCONFIG_CREATE]: Icons.Info,
-  [eventCodes.APPAUTHCONFIG_UPDATE]: Icons.Info,
-  [eventCodes.APPAUTHCONFIG_DELETE]: Icons.Info,
-  [eventCodes.APPAUTHCONFIG_VERIFY_SUCCESS]: Icons.Info,
-  [eventCodes.APPAUTHCONFIG_VERIFY_FAILURE]: Icons.Warning,
   [eventCodes.VNET_CONFIG_CREATE]: Icons.Info,
   [eventCodes.VNET_CONFIG_UPDATE]: Icons.Info,
   [eventCodes.VNET_CONFIG_DELETE]: Icons.Info,

@@ -35,8 +35,7 @@ import useTeleport from 'teleport/useTeleport';
 
 import { ButtonLockedFeature } from '../ButtonLockedFeature';
 
-export const ExternalAuditStorageCta = (_props: BoxProps) => null;
-const _ExternalAuditStorageCtaUnused = (props: BoxProps) => {
+export const ExternalAuditStorageCta = (props: BoxProps) => {
   const [showCta, setShowCta] = useState<boolean>(false);
   const ctx = useTeleport();
   const featureEnabled = cfg.entitlements.ExternalAuditStorage.enabled;
@@ -65,7 +64,7 @@ const _ExternalAuditStorageCtaUnused = (props: BoxProps) => {
       css={`
         grid-column: span 2;
         @media screen and (max-width: ${props =>
-            props.theme.breakpoints.mobile}) {
+          props.theme.breakpoints.mobile}) {
           grid-column: auto;
         }
       `}
@@ -74,7 +73,7 @@ const _ExternalAuditStorageCtaUnused = (props: BoxProps) => {
         justifyContent="space-between"
         css={`
           @media screen and (max-width: ${props =>
-              props.theme.breakpoints.mobile}) {
+            props.theme.breakpoints.mobile}) {
             flex-direction: column;
             gap: ${props => props.theme.space[3]}px;
           }

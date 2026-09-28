@@ -309,6 +309,12 @@ type AccessChecker interface {
 
 	// DelegationSessionID returns the ID of the current Delegation Session.
 	DelegationSessionID() string
+
+	// MaxKubernetesConnections returns the maximum number of concurrent
+	// Kubernetes connections allowed. If MaxKubernetesConnections is zero then
+	// no maximum was defined and the number of concurrent connections is
+	// unconstrained.
+	MaxKubernetesConnections() int64
 }
 
 // AccessInfo hold information about an identity necessary to check whether that
@@ -496,17 +502,34 @@ func (a *accessChecker) checkAllowedResources(r AccessCheckable) (allowedResourc
 	ctx := context.Background()
 	isLoggingEnabled := rbacLogger.Enabled(ctx, logutils.TraceLevel)
 
+	var match *types.ResourceAccessID
 	for _, resourceID := range a.info.AllowedResourceAccessIDs {
-		if id := resourceID.GetResourceID(); id.ClusterName == a.localCluster && matchesUCRResource(resourceID, r) {
-			// Allowed to access this resource by resource ID, move on to role checks.
+		id := resourceID.GetResourceID()
+		if id.ClusterName != a.localCluster || !matchesUCRResource(resourceID, r) {
+			continue
+		}
+		if resourceID.GetConstraints().Unenforceable() {
 			if isLoggingEnabled {
-				rbacLogger.LogAttrs(ctx, logutils.TraceLevel, "Matched allowed resource ID",
+				rbacLogger.LogAttrs(ctx, logutils.TraceLevel, "Access denied, matched resource ID carries constraints this component cannot enforce",
 					slog.String("resource_id", types.ResourceIDToString(id)),
 				)
 			}
-
-			return allowedResourceMatch{&resourceID}, nil
+			return allowedResourceMatch{}, trace.AccessDenied(
+				"access to %v %+q denied because it carries constraints this component cannot enforce; they may have been created by a newer Teleport version",
+				r.GetKind(), r.GetName())
 		}
+		if match == nil {
+			match = &resourceID
+		}
+	}
+	if match != nil {
+		// Allowed to access this resource by resource ID, move on to role checks.
+		if isLoggingEnabled {
+			rbacLogger.LogAttrs(ctx, logutils.TraceLevel, "Matched allowed resource ID",
+				slog.String("resource_id", types.ResourceIDToString(match.GetResourceID())),
+			)
+		}
+		return allowedResourceMatch{match}, nil
 	}
 
 	if isLoggingEnabled {
@@ -1178,26 +1201,6 @@ func (a *accessChecker) GetAllowedLoginsForResource(resource AccessCheckable) ([
 		err := a.CheckAccess(resource, AccessState{MFAVerified: true}, newLoginMatcher(login))
 		if err == nil {
 			allowed = append(allowed, login)
-		}
-	}
-
-	// For nodes that advertise a "vs-user" label, trim the display list to
-	// root/customer/that label's value. Logins granted via a shared,
-	// fleet-wide role (e.g. ssh-access) are otherwise all shown on every
-	// node, even though only one of them actually works on any given
-	// machine. Nodes without this label are untouched — this narrowing is
-	// specific to our VS convention, not a general-purpose behavior change.
-	if resource.GetKind() == types.KindNode {
-		if srv, ok := resource.(types.Server); ok {
-			if vsUser := srv.GetAllLabels()["vs-user"]; vsUser != "" {
-				filtered := allowed[:0]
-				for _, login := range allowed {
-					if login == "root" || login == "customer" || login == vsUser {
-						filtered = append(filtered, login)
-					}
-				}
-				allowed = filtered
-			}
 		}
 	}
 

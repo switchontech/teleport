@@ -39,6 +39,7 @@ import (
 	authproto "github.com/gravitational/teleport/api/client/proto"
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	identitycenterv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/identitycenter/v1"
+	linuxdesktopv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/linuxdesktop/v1"
 	scopesv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/scopes/v1"
 	"github.com/gravitational/teleport/api/internalutils/stream"
 	apitracing "github.com/gravitational/teleport/api/observability/tracing"
@@ -185,7 +186,7 @@ func ForAuth(cfg Config) Config {
 		{Kind: types.KindLinuxDesktop},
 		{Kind: types.KindKubeServer, ScopeFilter: allScopes},
 		{Kind: types.KindInstaller},
-		{Kind: types.KindKubernetesCluster, ScopeFilter: allScopes},
+		{Kind: types.KindKubernetesCluster, ScopeFilter: allScopes, LoadSecrets: true},
 		{Kind: types.KindCrownJewel},
 		{Kind: types.KindSAMLIdPServiceProvider},
 		{Kind: types.KindUserGroup},
@@ -222,12 +223,11 @@ func ForAuth(cfg Config) Config {
 		{Kind: types.KindPlugin, LoadSecrets: true},
 		{Kind: types.KindPluginStaticCredentials},
 		{Kind: types.KindGitServer},
-		{Kind: types.KindWorkloadIdentity},
+		{Kind: types.KindWorkloadIdentity, ScopeFilter: allScopes},
 		{Kind: types.KindHealthCheckConfig},
 		{Kind: types.KindRelayServer},
-		{Kind: types.KindBotInstance},
+		{Kind: types.KindBotInstance, ScopeFilter: allScopes},
 		{Kind: types.KindRecordingEncryption},
-		{Kind: types.KindAppAuthConfig},
 		{Kind: types.KindInferenceModel},
 		{Kind: types.KindInferencePolicy},
 		{Kind: types.KindInferenceSecret},
@@ -296,7 +296,6 @@ func ForProxy(cfg Config) Config {
 		{Kind: types.KindGitServer},
 		{Kind: types.KindRelayServer},
 		{Kind: types.KindHealthCheckConfig},
-		{Kind: types.KindAppAuthConfig},
 	}
 	cfg.QueueSize = defaults.ProxyQueueSize
 	return cfg
@@ -383,7 +382,6 @@ func ForNode(cfg Config) Config {
 // ForKubernetes sets up watch configuration for a kubernetes service.
 func ForKubernetes(cfg Config) Config {
 	cfg.target = "kube"
-	unscoped := types.ScopeFilterFromProto(scopesv1.Filter_builder{Mode: scopesv1.Mode_MODE_UNSCOPED}.Build())
 	cfg.Watches = []types.WatchKind{
 		{Kind: types.KindCertAuthority, LoadSecrets: false, Filter: makeAllKnownCAsFilter().IntoMap()},
 		{Kind: types.KindClusterName},
@@ -394,7 +392,7 @@ func ForKubernetes(cfg Config) Config {
 		{Kind: types.KindUser},
 		{Kind: types.KindRole},
 		{Kind: types.KindKubeServer},
-		{Kind: types.KindKubernetesCluster, ScopeFilter: unscoped},
+		{Kind: types.KindKubernetesCluster, LoadSecrets: true},
 		{Kind: types.KindKubeWaitingContainer},
 		{Kind: types.KindHealthCheckConfig},
 	}
@@ -853,8 +851,6 @@ type Config struct {
 	RecordingEncryption services.RecordingEncryption
 	// Plugins is the plugin service used to retrieve plugin information.
 	Plugin services.Plugins
-	// AppAuthConfig is a app auth config service.
-	AppAuthConfig services.AppAuthConfigReader
 	// Summarizer is a summarizer service.
 	Summarizer services.Summarizer
 	// SubCAService reads CertAuthorityOverride resources.
@@ -1815,6 +1811,23 @@ func (c *Cache) listResources(ctx context.Context, req authproto.ListResourcesRe
 			filter,
 			func(d types.WindowsDesktopService) types.ResourceWithLabels {
 				return d.Clone()
+			},
+		)
+		return resp, trace.Wrap(err)
+	case types.KindLinuxDesktop:
+		resp, err := buildListResourcesResponse(
+			func(yield func(types.ResourceWithLabels) bool) {
+				for desktop := range c.collections.linuxDesktops.store.resources(linuxDesktopNameIndex, req.StartKey, "") {
+					if !yield(types.Resource153ToResourceWithLabels(desktop)) {
+						return
+					}
+				}
+			},
+			limit,
+			filter,
+			func(r types.ResourceWithLabels) types.ResourceWithLabels {
+				unwrapper := r.(types.Resource153UnwrapperT[*linuxdesktopv1.LinuxDesktop])
+				return types.Resource153ToResourceWithLabels(proto.CloneOf(unwrapper.UnwrapT()))
 			},
 		)
 		return resp, trace.Wrap(err)

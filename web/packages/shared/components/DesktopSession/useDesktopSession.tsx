@@ -30,7 +30,7 @@ import { Logger } from 'design/logger';
 import type { ToastNotificationItem } from 'shared/components/ToastNotification';
 import { Attempt } from 'shared/hooks/useAsync';
 import { ClientScreenSpec, ClipboardData, TdpClient } from 'shared/libs/tdp';
-import { isAbortError } from 'shared/utils/error';
+import { getErrorMessage, isAbortError } from 'shared/utils/error';
 
 declare global {
   interface Window {
@@ -206,7 +206,7 @@ export default function useDesktopSession(
         severity: 'warn',
         content: {
           title: 'Could not share a directory',
-          description: e.message,
+          description: getErrorMessage(e),
         },
       });
     }
@@ -222,7 +222,7 @@ export default function useDesktopSession(
           severity: 'warn',
           content: {
             title: 'Failed to unmount the shared directory',
-            description: e.message,
+            description: getErrorMessage(e),
           },
         });
       }
@@ -332,7 +332,7 @@ function commonFeaturePossible(
  * Determines whether clipboard sharing is/should-be possible based on whether it's allowed by the acl
  * and whether it's supported by the browser.
  */
-export function clipboardSharingPossible(
+function clipboardSharingPossible(
   clipboardSharingState: ClipboardSharingState
 ): boolean {
   return commonFeaturePossible(clipboardSharingState);

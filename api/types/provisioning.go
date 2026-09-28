@@ -178,6 +178,12 @@ type ProvisionToken interface {
 	GetBoundKeypairStatus() *ProvisionTokenStatusV2BoundKeypair
 	// GetGenericOIDC returns generic_oidc-specific configuration for this token.
 	GetGenericOIDC() (*ProvisionTokenSpecV2GenericOIDC, error)
+	// GetGithub returns github-specific configuration for this token.
+	GetGithub() *ProvisionTokenSpecV2GitHub
+	// GetGitLab returns gitlab-specific configuration for this token.
+	GetGitLab() *ProvisionTokenSpecV2GitLab
+	// GetTPM returns the TPM-specific configuration for this token.
+	GetTPM() *ProvisionTokenSpecV2TPM
 	// GetAWSIIDTTL returns the TTL of EC2 IIDs
 	GetAWSIIDTTL() Duration
 	// GetJoinMethod returns joining method that must be used with this token.
@@ -621,6 +627,21 @@ func (p *ProvisionTokenV2) GetGenericOIDC() (*ProvisionTokenSpecV2GenericOIDC, e
 	return p.Spec.GenericOIDC, nil
 }
 
+// GetGithub returns github-specific configuration for this token.
+func (p *ProvisionTokenV2) GetGithub() *ProvisionTokenSpecV2GitHub {
+	return p.Spec.GitHub
+}
+
+// GetGitLab returns github-specific configuration for this token.
+func (p *ProvisionTokenV2) GetGitLab() *ProvisionTokenSpecV2GitLab {
+	return p.Spec.GitLab
+}
+
+// GetTPM returns the TPM-specific configuration for this token.
+func (p *ProvisionTokenV2) GetTPM() *ProvisionTokenSpecV2TPM {
+	return p.Spec.TPM
+}
+
 // GetJoinMethod returns joining method that must be used with this token.
 func (p *ProvisionTokenV2) GetJoinMethod() JoinMethod {
 	return p.Spec.JoinMethod
@@ -998,8 +1019,6 @@ func (a *ProvisionTokenSpecV2Azure) checkAndSetDefaults() error {
 	return nil
 }
 
-const defaultGitLabDomain = "gitlab.com"
-
 func (a *ProvisionTokenSpecV2GitLab) checkAndSetDefaults() error {
 	if len(a.Allow) == 0 {
 		return trace.BadParameter(
@@ -1016,14 +1035,10 @@ func (a *ProvisionTokenSpecV2GitLab) checkAndSetDefaults() error {
 		}
 	}
 
-	if a.Domain == "" {
-		a.Domain = defaultGitLabDomain
-	} else {
-		if strings.Contains(a.Domain, "/") {
-			return trace.BadParameter(
-				"'spec.gitlab.domain' should not contain the scheme or path",
-			)
-		}
+	if strings.Contains(a.Domain, "/") {
+		return trace.BadParameter(
+			"'spec.gitlab.domain' should not contain the scheme or path",
+		)
 	}
 	return nil
 }
@@ -1089,7 +1104,6 @@ func (a *ProvisionTokenSpecV2TPM) validate() error {
 				"ekcert_allowed_cas[%d]: parsing certificate",
 				i,
 			)
-
 		}
 	}
 

@@ -19,9 +19,11 @@ package joining
 import (
 	"cmp"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/pem"
 	"net/url"
 	"slices"
 	"strings"
@@ -348,6 +350,138 @@ func validateGenericOIDC(spec *joiningv1.GenericOIDC) error {
 	return nil
 }
 
+// validateGithub validates the GitHub-specific scoped token configuration.
+// It checks that the token usage mode is compatible, that enterprise_server_host
+// does not contain a scheme or path, that enterprise_server_host and enterprise_slug
+// are mutually exclusive, and that at least one allow rule with a non-empty
+// field is set.
+func validateGithub(spec *joiningv1.Github, tokenUsageMode TokenUsageMode) error {
+	if spec == nil {
+		return trace.BadParameter("github configuration must be defined for a scoped token when using the github join method")
+	}
+	if tokenUsageMode == TokenUsageModeSingle {
+		return trace.BadParameter("usage mode %q is not supported for github join method", TokenUsageModeSingle)
+	}
+	if strings.Contains(spec.GetEnterpriseServerHost(), "/") {
+		return trace.BadParameter("'github.enterprise_server_host' should not contain the scheme or path")
+	}
+	if spec.GetEnterpriseServerHost() != "" && spec.GetEnterpriseSlug() != "" {
+		return trace.BadParameter("'github.enterprise_server_host' and 'github.enterprise_slug' cannot both be set")
+	}
+
+	if len(spec.GetAllow()) == 0 {
+		return trace.BadParameter("the github join method requires at least one token allow rule")
+	}
+
+	for _, rule := range spec.GetAllow() {
+		repoSet := rule.GetRepository() != ""
+		ownerSet := rule.GetRepositoryOwner() != ""
+		subSet := rule.GetSub() != ""
+		enterpriseSet := rule.GetEnterprise() != ""
+		enterpriseIDSet := rule.GetEnterpriseId() != ""
+		if !subSet && !ownerSet && !repoSet && !enterpriseSet && !enterpriseIDSet {
+			return trace.BadParameter(`allow rule for github must include at least one of "repository", "repository_owner", "sub", "enterprise" or "enterprise_id"`)
+		}
+	}
+
+	return nil
+}
+
+// validateGitLab validates the GitLab-specific scoped token configuration.
+// The token usage mode must not be "single".
+// The domain must not contain a scheme or path.
+// There must be at least one allow rule.
+// Each allow rule must have at least one of ['sub', 'project_path', 'namespace_path', 'ci_config_ref_uri'].
+func validateGitLab(spec *joiningv1.GitLab, tokenUsageMode TokenUsageMode) error {
+	if spec == nil {
+		return trace.BadParameter("gitlab configuration must be defined for a scoped token when using the gitlab join method")
+	}
+	if tokenUsageMode == TokenUsageModeSingle {
+		return trace.BadParameter("usage mode %q is not supported for gitlab join method", TokenUsageModeSingle)
+	}
+
+	// empty domain field allowed
+	if spec.GetDomain() != "" && strings.Contains(spec.GetDomain(), "/") {
+		return trace.BadParameter("'spec.gitlab.domain' should not contain a scheme or path")
+	}
+
+	if len(spec.GetAllow()) == 0 {
+		return trace.BadParameter("the gitlab join method requires defined gitlab allow rules")
+	}
+
+	for _, allowRule := range spec.GetAllow() {
+		if allowRule.GetSub() == "" && allowRule.GetNamespacePath() == "" && allowRule.GetProjectPath() == "" && allowRule.GetCiConfigRefUri() == "" {
+			return trace.BadParameter("the gitlab join method requires allow rules with at least one of ['sub', 'project_path', 'namespace_path', 'ci_config_ref_uri'] to ensure security.")
+		}
+	}
+	return nil
+}
+
+// validateTPM validates the TPM-specific scoped token configuration. Note that
+// checks from ProvisionTokenSpecV2TPM.validate() are replicated here.
+func validateTPM(spec *joiningv1.TPM) error {
+	if spec == nil {
+		return trace.BadParameter("tpm: the .spec.tpm field is required for this join method")
+	}
+
+	for i, caData := range spec.GetEkcertAllowedCas() {
+		p, _ := pem.Decode([]byte(caData))
+		if p == nil {
+			return trace.BadParameter(
+				"ekcert_allowed_cas[%d]: no pem block found",
+				i,
+			)
+		}
+		if p.Type != "CERTIFICATE" {
+			return trace.BadParameter(
+				"ekcert_allowed_cas[%d]: pem block is not 'CERTIFICATE' type",
+				i,
+			)
+		}
+		if _, err := x509.ParseCertificate(p.Bytes); err != nil {
+			return trace.Wrap(
+				err,
+				"ekcert_allowed_cas[%d]: parsing certificate",
+				i,
+			)
+		}
+	}
+
+	if len(spec.GetAllow()) == 0 {
+		return trace.BadParameter(
+			"allow: at least one rule must be set",
+		)
+	}
+
+	hasCAs := len(spec.GetEkcertAllowedCas()) > 0
+	for i, allowRule := range spec.GetAllow() {
+		if len(allowRule.GetEkPublicHash()) == 0 && len(allowRule.GetEkCertificateSerial()) == 0 {
+			return trace.BadParameter(
+				"allow[%d]: at least one of ['ek_public_hash', 'ek_certificate_serial'] must be set",
+				i,
+			)
+		}
+
+		// This is ported from services/local/provisioning.go's
+		// validateTPMToken() which was deliberately separate from the overall
+		// CheckAndSetDefaults() -> validate() path so as to not affect existing
+		// tokens. There are no existing scoped TPM tokens, so we can safely
+		// inline it here.
+		//
+		// This check doesn't apply if CAs are present: per the source impl,
+		// serials are not trustworthy when certificates are verified against a
+		// configured CA, so they're optional if CAs are also set.
+		hasSerialWithoutHash := allowRule.GetEkCertificateSerial() != "" && allowRule.GetEkPublicHash() == ""
+		if !hasCAs && hasSerialWithoutHash {
+			return trace.BadParameter(
+				"allow[%d]: ek_certificate_serial requires ek_public_hash or "+
+					"ekcert_allowed_cas to be set so that the EK certificate "+
+					"can be verified", i)
+		}
+	}
+	return nil
+}
+
 // validates per join method token configurations
 func validateJoinMethod(token *joiningv1.ScopedToken) error {
 	switch types.JoinMethod(token.GetSpec().GetJoinMethod()) {
@@ -373,6 +507,14 @@ func validateJoinMethod(token *joiningv1.ScopedToken) error {
 		// Bound keypair tokens are always valid
 	case types.JoinMethodGenericOIDC:
 		return trace.Wrap(validateGenericOIDC(token.GetSpec().GetGenericOidc()), "generic_oidc join method")
+	case types.JoinMethodGitHub:
+		if err := validateGithub(token.GetSpec().GetGithub(), TokenUsageMode(token.GetSpec().GetUsageMode())); err != nil {
+			return trace.Wrap(err, "github join method")
+		}
+	case types.JoinMethodGitLab:
+		return trace.Wrap(validateGitLab(token.GetSpec().GetGitlab(), TokenUsageMode(token.GetSpec().GetUsageMode())), "gitlab join method")
+	case types.JoinMethodTPM:
+		return trace.Wrap(validateTPM(token.GetSpec().GetTpm()), "tpm join method")
 	default:
 		return trace.BadParameter("join method %q does not support scoping", token.GetSpec().GetJoinMethod())
 	}
@@ -507,10 +649,13 @@ func StrongValidateToken(token *joiningv1.ScopedToken) error {
 		return trace.Wrap(err)
 	}
 
-	switch TokenUsageMode(spec.GetUsageMode()) {
-	case TokenUsageModeSingle, TokenUsageModeUnlimited, TokenUsageModeBot:
-	default:
-		return trace.BadParameter("scoped token mode is not supported")
+	var allowedUsageModes = []string{
+		string(TokenUsageModeBot),
+		string(TokenUsageModeSingle),
+		string(TokenUsageModeUnlimited),
+	}
+	if !slices.Contains(allowedUsageModes, spec.GetUsageMode()) {
+		return trace.BadParameter("spec.usage_mode: %q is not one of [%s]", spec.GetUsageMode(), strings.Join(allowedUsageModes, ", "))
 	}
 
 	if len(spec.GetRoles()) == 0 {
@@ -1003,6 +1148,89 @@ func (t *Token) GetGenericOIDC() (*types.ProvisionTokenSpecV2GenericOIDC, error)
 		MustMatchFields: globalMatchers,
 		AllowAny:        allow,
 	}, nil
+}
+
+func (t *Token) GetGithub() *types.ProvisionTokenSpecV2GitHub {
+	spec := t.scoped.GetSpec().GetGithub()
+
+	allow := make([]*types.ProvisionTokenSpecV2GitHub_Rule, len(spec.GetAllow()))
+	for i, rule := range spec.GetAllow() {
+		allow[i] = &types.ProvisionTokenSpecV2GitHub_Rule{
+			Sub:             rule.GetSub(),
+			Repository:      rule.GetRepository(),
+			RepositoryOwner: rule.GetRepositoryOwner(),
+			Workflow:        rule.GetWorkflow(),
+			Environment:     rule.GetEnvironment(),
+			Actor:           rule.GetActor(),
+			Ref:             rule.GetRef(),
+			RefType:         rule.GetRefType(),
+			Enterprise:      rule.GetEnterprise(),
+			EnterpriseID:    rule.GetEnterpriseId(),
+		}
+	}
+
+	return &types.ProvisionTokenSpecV2GitHub{
+		EnterpriseServerHost: spec.GetEnterpriseServerHost(),
+		EnterpriseSlug:       spec.GetEnterpriseSlug(),
+		StaticJWKS:           spec.GetStaticJwks(),
+		Allow:                allow,
+	}
+}
+
+func (t *Token) GetGitLab() *types.ProvisionTokenSpecV2GitLab {
+	spec := t.scoped.GetSpec().GetGitlab()
+
+	allow := make([]*types.ProvisionTokenSpecV2GitLab_Rule, len(spec.GetAllow()))
+	for i, rule := range spec.GetAllow() {
+		allow[i] = &types.ProvisionTokenSpecV2GitLab_Rule{
+			Sub:               rule.GetSub(),
+			Ref:               rule.GetRef(),
+			RefType:           rule.GetRefType(),
+			NamespacePath:     rule.GetNamespacePath(),
+			ProjectPath:       rule.GetProjectPath(),
+			PipelineSource:    rule.GetPipelineSource(),
+			Environment:       rule.GetEnvironment(),
+			UserLogin:         rule.GetUserLogin(),
+			UserID:            rule.GetUserId(),
+			UserEmail:         rule.GetUserEmail(),
+			CIConfigSHA:       rule.GetCiConfigSha(),
+			CIConfigRefURI:    rule.GetCiConfigRefUri(),
+			DeploymentTier:    rule.GetDeploymentTier(),
+			ProjectVisibility: rule.GetProjectVisibility(),
+		}
+		if rule.HasRefProtected() {
+			allow[i].RefProtected = types.NewBoolOption(rule.GetRefProtected())
+		}
+		if rule.HasEnvironmentProtected() {
+			allow[i].EnvironmentProtected = types.NewBoolOption(rule.GetEnvironmentProtected())
+		}
+	}
+
+	return &types.ProvisionTokenSpecV2GitLab{
+		Domain:     spec.GetDomain(),
+		StaticJWKS: spec.GetStaticJwks(),
+		Allow:      allow,
+	}
+}
+
+// GetTPM returns the TPM configuration for this token. Returns an empty but
+// not nil value if TPM was not configured.
+func (t *Token) GetTPM() *types.ProvisionTokenSpecV2TPM {
+	spec := t.scoped.GetSpec().GetTpm()
+
+	allow := make([]*types.ProvisionTokenSpecV2TPM_Rule, len(spec.GetAllow()))
+	for i, rule := range spec.GetAllow() {
+		allow[i] = &types.ProvisionTokenSpecV2TPM_Rule{
+			Description:         rule.GetDescription(),
+			EKPublicHash:        rule.GetEkPublicHash(),
+			EKCertificateSerial: rule.GetEkCertificateSerial(),
+		}
+	}
+
+	return &types.ProvisionTokenSpecV2TPM{
+		Allow:            allow,
+		EKCertAllowedCAs: spec.GetEkcertAllowedCas(),
+	}
 }
 
 // GetScoped returns the inner scoped token wrapped by this [provision.Token].

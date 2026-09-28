@@ -119,7 +119,7 @@ export function isLLM(app: App): boolean {
  * perspective both are accessed through `tsh proxy app`; the `tls://` variant
  * only differs in how the app service connects to the upstream target.
  */
-export function isTcp(app: App): boolean {
+function isTcp(app: App): boolean {
   return (
     app.endpointUri.startsWith('tcp://') || app.endpointUri.startsWith('tls://')
   );

@@ -718,6 +718,35 @@ Example:
 }
 ```
 
+## app.session.request.denied
+
+App Request Denied
+
+Example:
+
+```json
+{
+  "addr.remote": "127.0.0.1:41106",
+  "app_name": "dev-app",
+  "app_public_addr": "dev-app.root.gravitational.io",
+  "app_session_id": "6593cf87-9839-4f18-abf8-c54873aaeb4e",
+  "app_uri": "http://localhost:8080",
+  "cluster_name": "root",
+  "code": "T2020E",
+  "deny_kind": "teleport_request_not_allowed",
+  "ei": 0,
+  "event": "app.session.request.denied",
+  "method": "GET",
+  "namespace": "default",
+  "path": "/api/things",
+  "server_id": "8e70002c-7a07-4513-a3fa-ac556a1d7534",
+  "server_version": "19.0.0",
+  "time": "2022-08-10T19:54:41.444Z",
+  "uid": "e0b0e0f4-6b1a-4b6e-9f3f-2a4f9a1d6c11",
+  "user": "alice"
+}
+```
+
 ## app.session.start
 
 There are multiple events with the `app.session.start` type.
@@ -808,107 +837,6 @@ Example:
   "aws_role_arn": "arn:aws:iam::1234567890:role/steve",
   "name": "dynamic-app",
   "user": "mike"
-}
-```
-
-## app_auth_config.create
-
-App Auth Config created
-
-Example:
-
-```json
-{
-  "cluster_name": "dev",
-  "code": "TAAC001I",
-  "ei": 0,
-  "event": "app_auth_config.create",
-  "expires": "0001-01-01T00:00:00Z",
-  "name": "example",
-  "time": "2025-03-04T15:49:21.869Z",
-  "uid": "0cb8a020-46ee-4938-833a-69bc03a7a831",
-  "user": "alice"
-}
-```
-
-## app_auth_config.delete
-
-App Auth Config deleted
-
-Example:
-
-```json
-{
-  "cluster_name": "dev",
-  "code": "TAAC003I",
-  "ei": 0,
-  "event": "app_auth_config.delete",
-  "expires": "0001-01-01T00:00:00Z",
-  "name": "example",
-  "time": "2025-03-04T15:49:21.869Z",
-  "uid": "0cb8a020-46ee-4938-833a-69bc03a7a831",
-  "user": "alice"
-}
-```
-
-## app_auth_config.update
-
-App Auth Config updated
-
-Example:
-
-```json
-{
-  "cluster_name": "dev",
-  "code": "TAAC002I",
-  "ei": 0,
-  "event": "app_auth_config.update",
-  "expires": "0001-01-01T00:00:00Z",
-  "name": "example",
-  "time": "2025-03-04T15:49:21.869Z",
-  "uid": "0cb8a020-46ee-4938-833a-69bc03a7a831",
-  "user": "alice"
-}
-```
-
-## app_auth_config.verify.failure
-
-App authentication failed
-
-Example:
-
-```json
-{
-  "cluster_name": "dev",
-  "code": "TAAC004E",
-  "ei": 0,
-  "event": "app_auth_config.verify.failure",
-  "expires": "0001-01-01T00:00:00Z",
-  "time": "2025-03-04T15:49:21.869Z",
-  "app_auth_config": "example",
-  "app_name": "mcp-everything",
-  "error": "Invalid token: audience mismatch"
-}
-```
-
-## app_auth_config.verify.success
-
-App authentication succeeded
-
-Example:
-
-```json
-{
-  "cluster_name": "dev",
-  "code": "TAAC004I",
-  "ei": 0,
-  "event": "app_auth_config.verify.success",
-  "expires": "0001-01-01T00:00:00Z",
-  "time": "2025-03-04T15:49:21.869Z",
-  "user": "alice",
-  "success": true,
-  "app_auth_config": "example",
-  "app_name": "mcp-everything"
 }
 ```
 
@@ -1732,8 +1660,10 @@ Example:
   "cluster_name": "localhost",
   "code": "CIR001I",
   "ei": 0,
+  "enforcement_expires": "2026-10-21T20:45:14.775Z",
   "event": "cir.update",
   "expires": "0001-01-01T00:00:00Z",
+  "mode": "enforced",
   "name": "client_ip_restriction",
   "success": true,
   "time": "2025-10-21T20:45:14.775Z",
@@ -3630,6 +3560,83 @@ Example:
   "time": "2023-01-12T21:31:29.191Z",
   "uid": "bbbc496f-820b-4f49-ae0d-1c1b29faee85",
   "user": "lisa"
+}
+```
+
+## device.enroll_pairing.approve
+
+There are multiple events with the `device.enroll_pairing.approve` type.
+
+### TV011I
+
+Device Enroll Pairing Approved
+
+Example:
+
+```json
+{
+  "cluster_name": "im-a-cluster-name",
+  "code": "TV011I",
+  "device": {
+    "asset_tag": "M2CQVQV64R",
+    "device_id": "",
+    "os_type": 4
+  },
+  "ei": 0,
+  "event": "device.enroll_pairing.approve",
+  "success": true,
+  "time": "2024-04-08T19:39:48.1Z",
+  "uid": "b8c4f0a2-5e6d-7f8a-0123-abc456789012",
+  "user": "llama"
+}
+```
+
+### TV011W
+
+Device Enroll Pairing Approval Failed
+
+Example:
+
+```json
+{
+  "cluster_name": "im-a-cluster-name",
+  "code": "TV011W",
+  "device": {
+    "asset_tag": "M2CQVQV64R",
+    "device_id": "",
+    "os_type": 4
+  },
+  "ei": 0,
+  "error": "enroll pairing is not awaiting approval",
+  "event": "device.enroll_pairing.approve",
+  "success": false,
+  "time": "2024-04-08T19:40:48.1Z",
+  "uid": "b8c4f0a2-5e6d-7f8a-0123-abc456789013",
+  "user": "llama"
+}
+```
+
+## device.enroll_pairing.deny
+
+Device Enroll Pairing Denied
+
+Example:
+
+```json
+{
+  "cluster_name": "im-a-cluster-name",
+  "code": "TV012W",
+  "device": {
+    "asset_tag": "M2CQVQV64R",
+    "device_id": "",
+    "os_type": 4
+  },
+  "ei": 0,
+  "event": "device.enroll_pairing.deny",
+  "success": false,
+  "time": "2024-04-08T19:41:48.1Z",
+  "uid": "c9d5a1b3-6f7e-8a9b-2345-bcd567890123",
+  "user": "llama"
 }
 ```
 

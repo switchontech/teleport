@@ -28,8 +28,6 @@ import {
   UnaryCall,
 } from '@protobuf-ts/runtime-rpc';
 
-import { ensureError } from 'shared/utils/error';
-
 import {
   serializeError,
   type SerializedError,
@@ -143,7 +141,7 @@ type Writeable<T> = {
  * The regular one is replaced with `CloneableAbortSignal`
  * that can be passed over the context bridge.
  */
-export type CloneableRpcOptions = Omit<RpcOptions, 'abort'> & {
+type CloneableRpcOptions = Omit<RpcOptions, 'abort'> & {
   abort?: CloneableAbortSignal;
 };
 
@@ -314,7 +312,7 @@ export function isRpcErrorReloginResolvable(error: unknown): boolean {
 }
 
 function cloneError(error: unknown): SerializedError {
-  return serializeError(ensureError(error));
+  return serializeError(error);
 }
 
 function cloneRequests<O extends object>(

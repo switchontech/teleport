@@ -16,7 +16,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import '@testing-library/jest-dom';
 import {
   createThemeSystem,
   TELEPORT_THEME,
@@ -26,7 +25,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   act,
   fireEvent,
-  getByTestId,
   prettyDOM,
   screen,
   render as testingRender,
@@ -34,7 +32,6 @@ import {
   waitForElementToBeRemoved,
   within,
 } from '@testing-library/react';
-import 'jest-styled-components';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, JsonBodyType } from 'msw';
 import { setupServer } from 'msw/node';
@@ -80,9 +77,7 @@ function render(
  updates / timeouts to finish.
  */
 function tick() {
-  return new Promise<void>(res =>
-    jest.requireActual('timers').setImmediate(res)
-  );
+  return new Promise<void>(res => setTimeout(res, 0));
 }
 
 screen.debug = () => {
@@ -184,6 +179,48 @@ export function enableMswServer() {
   afterAll(() => server.close());
 }
 
+/**
+ * Mocks HTMLElement.prototype.offsetParent for the current test suite. Call
+ * this at the top level of a test file (or inside a describe block) that
+ * exercises code filtering out hidden elements by offsetParent, e.g. the focus
+ * trap in Modal.
+ */
+export function mockOffsetParent() {
+  let originalOffsetParent: PropertyDescriptor | undefined;
+
+  beforeAll(() => {
+    originalOffsetParent = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'offsetParent'
+    );
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+      get(this: HTMLElement) {
+        // Walk up the ancestor chain — in real browsers, offsetParent is null when any
+        // ancestor has display: none.
+        let el: HTMLElement | null = this;
+        while (el) {
+          if (el.style.display === 'none') {
+            return null;
+          }
+          el = el.parentElement;
+        }
+        return this.parentElement;
+      },
+      configurable: true,
+    });
+  });
+
+  afterAll(() => {
+    if (originalOffsetParent) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        'offsetParent',
+        originalOffsetParent
+      );
+    }
+  });
+}
+
 export {
   act,
   screen,
@@ -192,9 +229,7 @@ export {
   testThemeSystem,
   tick,
   render,
-  prettyDOM,
   waitFor,
-  getByTestId,
   MemoryRouter as Router,
   userEvent,
   waitForElementToBeRemoved,
