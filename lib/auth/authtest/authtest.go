@@ -24,6 +24,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -1801,4 +1802,24 @@ func FlushCache(t *testing.T, clt Flusher) {
 			t.Fatal("Time out waiting for role to be replicated")
 		}
 	}
+}
+
+// StubOIDCService is a minimal auth.OIDCService implementation for tests that
+// need to get past ServerWithRoles's "is an OIDC service registered" gate
+// (see auth.Server.SetOIDCService) without exercising real OIDC behavior.
+// Every method unconditionally returns trace.NotImplemented, so a caller
+// that reaches the stub is unambiguously exercising the gate rather than
+// accidentally succeeding for some unrelated reason.
+type StubOIDCService struct{}
+
+func (StubOIDCService) CreateOIDCAuthRequest(ctx context.Context, req types.OIDCAuthRequest) (*types.OIDCAuthRequest, error) {
+	return nil, trace.NotImplemented("authtest.StubOIDCService")
+}
+
+func (StubOIDCService) CreateOIDCAuthRequestForMFA(ctx context.Context, req types.OIDCAuthRequest) (*types.OIDCAuthRequest, error) {
+	return nil, trace.NotImplemented("authtest.StubOIDCService")
+}
+
+func (StubOIDCService) ValidateOIDCAuthCallback(ctx context.Context, q url.Values) (*authclient.OIDCAuthResponse, error) {
+	return nil, trace.NotImplemented("authtest.StubOIDCService")
 }
