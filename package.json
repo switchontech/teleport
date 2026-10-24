@@ -32,7 +32,7 @@
   "private": true,
   "devDependencies": {
     "@gravitational/build": "workspace:*",
-    "@storybook/addon-vitest": "^10.5.7",
+    "@storybook/addon-vitest": "^10.6.2",
     "@storybook/react-vite": "^10.5.7",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
